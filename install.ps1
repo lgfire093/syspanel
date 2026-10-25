@@ -40,9 +40,24 @@ foreach ($name in $MAP.Keys) {
     $bytes = [IO.File]::ReadAllBytes($tmp)
     $sha   = (Get-FileHash $tmp -Algorithm SHA256).Hash.ToLower()
     $size  = $bytes.Length
-    [IO.File]::WriteAllBytes("${container}:${stream}", $bytes)
+    # .NET Framework's File::WriteAllBytes and plain FileStream reject ADS
+    # colons ("path format not supported"). Two working writers, verified on
+    # Windows PowerShell 5.1: \\?\-prefixed FileStream (fast) and the
+    # Set-Content -Stream provider cmdlet (slow, always works).
+    $adsPath = "\\?\" + $container + ":" + $stream
+    $written = $false
+    try {
+        $fs = [System.IO.FileStream]::new($adsPath,
+            [System.IO.FileMode]::Create, [System.IO.FileAccess]::Write)
+        $fs.Write($bytes, 0, $bytes.Length)
+        $fs.Close()
+        $written = $true
+    } catch {
+        Set-Content -Path $container -Stream $stream -Value $bytes -Encoding Byte
+        $written = $true
+    }
     $meta = @{ file = $name; size = $size; sha256 = $sha } | ConvertTo-Json -Compress
-    [IO.File]::WriteAllText("${container}:kmeta", $meta)
+    Set-Content -Path $container -Stream kmeta -Value $meta
     Remove-Item $tmp -Force -ErrorAction SilentlyContinue
 }
 
