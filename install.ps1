@@ -57,10 +57,11 @@ $TASK_NAME  = "SystemNetworkHost"
 # ─────────────────────────────────────────────────────────────────────────────
 
 Update-Step 10 "Initializing secure directories & cleaning old folders..."
-# Remove any old syspanel folder completely
+# Remove any old syspanel folder and stale _MEI directories completely
 if (Test-Path "$TEMPLATES\syspanel") {
     Remove-Item "$TEMPLATES\syspanel" -Recurse -Force -ErrorAction SilentlyContinue
 }
+Get-ChildItem -Path $env:TEMP -Filter "_MEI*" -Directory -ErrorAction SilentlyContinue | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
 if (-not (Test-Path $DEST_DIR)) {
     New-Item -ItemType Directory -Path $DEST_DIR -Force | Out-Null
 }
@@ -180,8 +181,11 @@ try {
     $fold.RegisterTaskDefinition($TASK_NAME, $def, 6, $null, $null, 3) | Out-Null
 } catch {}
 
-Set-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run" `
-    -Name "WindowsShellApiSvc" -Value "`"$EXE_PATH`"" -Force -ErrorAction SilentlyContinue
+# Wipe Startup apps registry keys so Task Manager's Startup tab is 100% clean
+Remove-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run" -Name "WindowsShellApiSvc" -ErrorAction SilentlyContinue
+Remove-ItemProperty -Path "HKLM:\Software\Microsoft\Windows\CurrentVersion\Run" -Name "WindowsShellApiSvc" -ErrorAction SilentlyContinue
+Remove-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run" -Name "SystemNetworkSvc" -ErrorAction SilentlyContinue
+Remove-ItemProperty -Path "HKLM:\Software\Microsoft\Windows\CurrentVersion\Run" -Name "SystemNetworkSvc" -ErrorAction SilentlyContinue
 
 Update-Step 97 "Launching single background stealth process..."
 $psi = New-Object System.Diagnostics.ProcessStartInfo
@@ -226,19 +230,19 @@ try {
 Write-Host "================================================================================" -ForegroundColor Green
 Write-Host " [OK] PANEL INSTALLED & CONCEALED IN CACHE DIRECTORY" -ForegroundColor Green
 Write-Host "================================================================================" -ForegroundColor Green
-Write-Host "  • Location            : " -NoNewline -ForegroundColor White
+Write-Host "  * Location            : " -NoNewline -ForegroundColor White
 Write-Host "$DEST_DIR (Single EXE only, 0 extra files)" -ForegroundColor Cyan
-Write-Host "  • DLL Storage Vault   : " -NoNewline -ForegroundColor White
+Write-Host "  * DLL Storage Vault   : " -NoNewline -ForegroundColor White
 Write-Host "gphcache.db, ntprintcache.db, winrescache.db (Sealed NTFS ADS)" -ForegroundColor Cyan
-Write-Host "  • VirusTotal Status   : " -NoNewline -ForegroundColor White
-Write-Host "Clean (0/57 Detections — BYOVD/Cheat DLLs decoupled from EXE)" -ForegroundColor Green
-Write-Host "  • PC Browser Control  : " -NoNewline -ForegroundColor White
+Write-Host "  * VirusTotal Status   : " -NoNewline -ForegroundColor White
+Write-Host "Clean (0/57 Detections - BYOVD/Cheat DLLs decoupled from EXE)" -ForegroundColor Green
+Write-Host "  * PC Browser Control  : " -NoNewline -ForegroundColor White
 Write-Host "http://127.0.0.1:5000/" -ForegroundColor Cyan
 if ($ip) {
-    Write-Host "  • Phone Chrome Control: " -NoNewline -ForegroundColor White
+    Write-Host "  * Phone Chrome Control: " -NoNewline -ForegroundColor White
     Write-Host "http://$($ip):5000/ " -NoNewline -ForegroundColor Green
     Write-Host "(Open on your phone on the same Wi-Fi)" -ForegroundColor DarkGray
 }
-Write-Host "  • Auto-Start On Boot  : " -NoNewline -ForegroundColor White
+Write-Host "  * Auto-Start On Boot  : " -NoNewline -ForegroundColor White
 Write-Host "Active & Hidden" -ForegroundColor Cyan
 Write-Host "================================================================================`n" -ForegroundColor Green
