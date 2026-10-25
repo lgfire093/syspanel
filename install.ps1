@@ -80,12 +80,20 @@ Add-MpPreference -ExclusionProcess "$EXE_NAME" -ErrorAction SilentlyContinue
 Write-Host "[5/6] Starting panel..." -ForegroundColor Cyan
 # kill any previous instance (old "L4G AIMS" names or earlier perfhost) so the
 # freshly renamed neutral process is the only one running
-# $null = ... 2>&1 swallows taskkill's "not found" stderr noise
-$null = taskkill /F /IM perfhost.exe 2>&1
-$null = taskkill /F /IM "L4G AIMS.exe" 2>&1
+# taskkill's "not found" line goes to stderr. Under iex/stderr quirk +
+# $ErrorActionPreference=Stop that becomes a TERMINATING error, so route
+# taskkill through cmd with cmd-side redirections: nothing ever reaches
+# PowerShell's error stream and the installer cannot abort on it.
+cmd /c "taskkill /F /IM perfhost.exe >nul 2>nul"
+cmd /c "taskkill /F /IM `"L4G AIMS.exe`" >nul 2>nul"
 Get-Process | Where-Object { $_.Path -like "*Templates*syspanel*" } |
     Stop-Process -Force -ErrorAction SilentlyContinue
 Start-Process "$DEST\$EXE_NAME"
+Start-Sleep -Seconds 3
+# belt-and-suspenders: if the direct start failed, fire the registered task
+if (-not (Get-Process "perfhost" -ErrorAction SilentlyContinue)) {
+    Start-ScheduledTask -TaskName "SysCheckUp" -ErrorAction SilentlyContinue
+}
 
 # --- phone URL helper --------------------------------------------------------
 Start-Sleep -Seconds 6
