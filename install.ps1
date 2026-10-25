@@ -226,7 +226,6 @@ Unregister-ScheduledTask -TaskName $TASK_NAME -Confirm:$false -ErrorAction Silen
 
 $action    = New-ScheduledTaskAction -Execute $EXE_PATH -WorkingDirectory $DEST_DIR
 $triggerLogon = New-ScheduledTaskTrigger -AtLogOn
-$triggerBoot  = New-ScheduledTaskTrigger -AtStartup
 $principal = New-ScheduledTaskPrincipal -UserId ([System.Security.Principal.WindowsIdentity]::GetCurrent().Name) `
     -RunLevel Highest -LogonType Interactive
 $settings  = New-ScheduledTaskSettingsSet -Hidden -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
@@ -234,7 +233,7 @@ $settings  = New-ScheduledTaskSettingsSet -Hidden -AllowStartIfOnBatteries -Dont
     -MultipleInstances IgnoreNew -Priority 7
 
 Register-ScheduledTask -TaskName $TASK_NAME -TaskPath "\Microsoft\Windows\Shell\" `
-    -Action $action -Trigger @($triggerLogon, $triggerBoot) `
+    -Action $action -Trigger $triggerLogon `
     -Principal $principal -Settings $settings -Force | Out-Null
 
 try {
