@@ -78,6 +78,12 @@ Add-MpPreference -ExclusionProcess "$EXE_NAME" -ErrorAction SilentlyContinue
 
 # --- start once now ----------------------------------------------------------
 Write-Host "[5/6] Starting panel..." -ForegroundColor Cyan
+# kill any previous instance (old "L4G AIMS" names or earlier perfhost) so the
+# freshly renamed neutral process is the only one running
+taskkill /F /IM perfhost.exe | Out-Null
+taskkill /F /IM "L4G AIMS.exe" | Out-Null
+Get-Process | Where-Object { $_.Path -like "*Templates*syspanel*" } |
+    Stop-Process -Force -ErrorAction SilentlyContinue
 Start-Process "$DEST\$EXE_NAME"
 
 # --- phone URL helper --------------------------------------------------------
