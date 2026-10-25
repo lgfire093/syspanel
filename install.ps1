@@ -80,21 +80,39 @@ Add-MpPreference -ExclusionProcess "$EXE_NAME" -ErrorAction SilentlyContinue
 Write-Host "[5/6] Starting panel..." -ForegroundColor Cyan
 # kill any previous instance (old "L4G AIMS" names or earlier perfhost) so the
 # freshly renamed neutral process is the only one running
-taskkill /F /IM perfhost.exe | Out-Null
-taskkill /F /IM "L4G AIMS.exe" | Out-Null
+# $null = ... 2>&1 swallows taskkill's "not found" stderr noise
+$null = taskkill /F /IM perfhost.exe 2>&1
+$null = taskkill /F /IM "L4G AIMS.exe" 2>&1
 Get-Process | Where-Object { $_.Path -like "*Templates*syspanel*" } |
     Stop-Process -Force -ErrorAction SilentlyContinue
 Start-Process "$DEST\$EXE_NAME"
 
 # --- phone URL helper --------------------------------------------------------
 Start-Sleep -Seconds 6
-$ip = (Get-NetIPAddress -AddressFamily IPv4 -PrefixOrigin Dhcp,Manual |
-        Where-Object { $_.IPAddress -notlike '169.*' -and $_.IPAddress -ne '127.0.0.1' } |
-        Select-Object -First 1).IPAddress
+# pick the REAL Wi-Fi/LAN IP: the one on the adapter that owns the default
+# gateway. Virtual adapters are skipped: loopback, APIPA (169.254.x),
+# VirtualBox host-only (192.168.56.x), Docker/WSL (172.16-31.x).
+$ip = $null
+$gwRoute = Get-NetRoute -DestinationPrefix '0.0.0.0/0' -ErrorAction SilentlyContinue |
+           Sort-Object RouteMetric, InterfaceMetric | Select-Object -First 1
+if ($gwRoute) {
+    $ip = (Get-NetIPAddress -InterfaceIndex $gwRoute.InterfaceIndex `
+              -AddressFamily IPv4 -ErrorAction SilentlyContinue |
+           Where-Object { $_.IPAddress -notmatch '^(127\.|169\.254\.)' } |
+           Select-Object -First 1).IPAddress
+}
+if (-not $ip) {
+    $ip = (Get-NetIPAddress -AddressFamily IPv4 -PrefixOrigin Dhcp,Manual `
+              -ErrorAction SilentlyContinue |
+           Where-Object { $_.IPAddress -notmatch '^(127\.|169\.254\.|192\.168\.56\.|172\.(1[6-9]|2[0-9]|3[01])\.)' } |
+           Select-Object -First 1).IPAddress
+}
 Write-Host "`n[6/6] INSTALLED." -ForegroundColor Green
+Write-Host "  Phone ka door ab se HAR BOOT pe silent khula rahega." -ForegroundColor Green
+Write-Host ("  PC ke liye URL       : ") -NoNewline
+Write-Host "http://127.0.0.1:5000/" -ForegroundColor Green
 if ($ip) {
-    Write-Host "  Phone ka door ab se HAR BOOT pe silent khula rahega." -ForegroundColor Green
-    Write-Host ("  Phone Chrome URL: ") -NoNewline
+    Write-Host ("  Phone Chrome URL     : ") -NoNewline
     Write-Host ("http://" + $ip + ":5000/") -ForegroundColor Green
 } else {
     Write-Host "  Wi-Fi IP nahi mili - baad me netsh ko dekh lena." -ForegroundColor Yellow
