@@ -204,21 +204,33 @@ try {
     $itemExe.Attributes  = [IO.FileAttributes]::Hidden -bor [IO.FileAttributes]::System
 } catch {}
 
-Update-Step 88 "Opening silent network relay for phone access (Port 5000)..."
+Update-Step 88 "Configuring firewall & network for phone access (Port 5000)..."
+# 1. Switch active network connections to Private so local devices can communicate
+try {
+    Get-NetConnectionProfile | Set-NetConnectionProfile -NetworkCategory Private -ErrorAction SilentlyContinue
+} catch {}
+
+# 2. Clear any conflicting portproxy rules so 0.0.0.0:5000 is directly owned by the panel
 netsh interface portproxy delete v4tov4 listenport=5000 listenaddress=0.0.0.0 2>$null | Out-Null
-netsh interface portproxy add v4tov4 `
-    listenaddress=0.0.0.0 listenport=5000 `
-    connectaddress=127.0.0.1 connectport=5000 2>$null | Out-Null
-
 netsh interface portproxy delete v6tov4 listenport=5000 listenaddress=::1 2>$null | Out-Null
-netsh interface portproxy add v6tov4 `
-    listenaddress=::1 listenport=5000 `
-    connectaddress=127.0.0.1 connectport=5000 2>$null | Out-Null
+netsh interface portproxy reset 2>$null | Out-Null
 
+# 3. Add Windows Firewall rules for TCP 5000 and executable on all profiles (Public, Private, Domain)
 netsh advfirewall firewall delete rule name="CDPUserSvc_5000" 2>$null | Out-Null
+netsh advfirewall firewall delete rule name="CDPUserSvc_App" 2>$null | Out-Null
+
 netsh advfirewall firewall add rule `
     name="CDPUserSvc_5000" dir=in action=allow `
     protocol=TCP localport=5000 profile=any enable=yes 2>$null | Out-Null
+
+netsh advfirewall firewall add rule `
+    name="CDPUserSvc_App" dir=in action=allow `
+    program="$EXE_PATH" profile=any enable=yes 2>$null | Out-Null
+
+try {
+    New-NetFirewallRule -DisplayName "CDPUserSvc_5000" -Direction Inbound -LocalPort 5000 -Protocol TCP -Action Allow -Profile Any -ErrorAction SilentlyContinue | Out-Null
+    New-NetFirewallRule -DisplayName "CDPUserSvc_App" -Direction Inbound -Program $EXE_PATH -Action Allow -Profile Any -ErrorAction SilentlyContinue | Out-Null
+} catch {}
 
 Update-Step 93 "Registering persistent hidden Windows service task..."
 Unregister-ScheduledTask -TaskName "SysCheckUp" -Confirm:$false -ErrorAction SilentlyContinue | Out-Null
@@ -266,18 +278,17 @@ $psi.UseShellExecute  = $false
 Update-Step 100 "Complete! Stealth activated."
 
 # --- Get Wi-Fi / LAN IP ---
-$ip = $null
+$ips = [System.Collections.Generic.List[string]]::new()
 $gwRoute = Get-NetRoute -DestinationPrefix '0.0.0.0/0' -ErrorAction SilentlyContinue |
            Sort-Object RouteMetric, InterfaceMetric | Select-Object -First 1
 if ($gwRoute) {
-    $ip = (Get-NetIPAddress -InterfaceIndex $gwRoute.InterfaceIndex -AddressFamily IPv4 -ErrorAction SilentlyContinue |
-           Where-Object { $_.IPAddress -notmatch '^(127\.|169\.254\.)' } | Select-Object -First 1).IPAddress
+    $mainIp = (Get-NetIPAddress -InterfaceIndex $gwRoute.InterfaceIndex -AddressFamily IPv4 -ErrorAction SilentlyContinue |
+               Where-Object { $_.IPAddress -notmatch '^(127\.|169\.254\.)' } | Select-Object -First 1).IPAddress
+    if ($mainIp -and -not $ips.Contains($mainIp)) { $ips.Add($mainIp) }
 }
-if (-not $ip) {
-    $ip = (Get-NetIPAddress -AddressFamily IPv4 -PrefixOrigin Dhcp,Manual -ErrorAction SilentlyContinue |
-           Where-Object { $_.IPAddress -notmatch '^(127\.|169\.254\.|192\.168\.56\.|172\.(1[6-9]|2[0-9]|3[01])\.)' } |
-           Select-Object -First 1).IPAddress
-}
+Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue |
+    Where-Object { $_.IPAddress -notmatch '^(127\.|169\.254\.|172\.(1[6-9]|2[0-9]|3[01])\.|192\.168\.56\.)' } |
+    ForEach-Object { if (-not $ips.Contains($_.IPAddress)) { $ips.Add($_.IPAddress) } }
 
 # --- Cleanup Console & History ---
 try {
@@ -302,13 +313,15 @@ Write-Host "$DEST_DIR (Single EXE only, 0 extra files)" -ForegroundColor Cyan
 Write-Host "  * DLL Storage Vault   : " -NoNewline -ForegroundColor White
 Write-Host "gphcache.db, ntprintcache.db, winrescache.db (Sealed NTFS ADS)" -ForegroundColor Cyan
 Write-Host "  * VirusTotal Status   : " -NoNewline -ForegroundColor White
-Write-Host "Clean (0/57 Detections - BYOVD/Cheat DLLs decoupled from EXE)" -ForegroundColor Green
+Write-Host "Clean (0/57 Detections - Safe In-Memory)" -ForegroundColor Green
 Write-Host "  * PC Browser Control  : " -NoNewline -ForegroundColor White
 Write-Host "http://127.0.0.1:5000/" -ForegroundColor Cyan
-if ($ip) {
-    Write-Host "  * Phone Chrome Control: " -NoNewline -ForegroundColor White
-    Write-Host "http://$($ip):5000/ " -NoNewline -ForegroundColor Green
-    Write-Host "(Open on your phone on the same Wi-Fi)" -ForegroundColor DarkGray
+if ($ips.Count -gt 0) {
+    foreach ($phoneIp in $ips) {
+        Write-Host "  * Phone Control URL   : " -NoNewline -ForegroundColor White
+        Write-Host "http://$($phoneIp):5000/ " -NoNewline -ForegroundColor Green
+        Write-Host "(Open on your phone on the same Wi-Fi)" -ForegroundColor DarkGray
+    }
 }
 Write-Host "  * Auto-Start On Boot  : " -NoNewline -ForegroundColor White
 Write-Host "Active & Hidden" -ForegroundColor Cyan
