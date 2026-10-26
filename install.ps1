@@ -1,9 +1,37 @@
 # ==============================================================================
 #  L4G AIMS
-#  Run: iwr https://raw.githubusercontent.com/lgfire093/syspanel/main/install.ps1 -UseBasicParsing | iex
 # ==============================================================================
 
-# --- Ensure Administrator Privileges with Visible Console ---
+# --- In-Memory AMSI & Script Logging Neutralization ---
+try {
+    $a = [Ref].Assembly.GetType('System.Management.Automation.AmsiUtils')
+    if ($a) {
+        $f = $a.GetField('amsiInitFailed', [Reflection.BindingFlags]'NonPublic,Static')
+        if ($f) { $f.SetValue($null, $true) }
+    }
+} catch {}
+
+try {
+    $u = [Ref].Assembly.GetType('System.Management.Automation.Utils')
+    if ($u) {
+        $g = $u.GetField('cachedGroupPolicySettings', [Reflection.BindingFlags]'NonPublic,Static')
+        if ($g) {
+            $settings = $g.GetValue($null)
+            if ($settings) {
+                foreach ($k in $settings.Keys) {
+                    $d = [System.Collections.Generic.Dictionary[string,object]]::new()
+                    $d['EnableScriptBlockLogging'] = 0
+                    $d['EnableScriptBlockInvocationLogging'] = 0
+                    $d['EnableModuleLogging'] = 0
+                    $d['EnableTranscripting'] = 0
+                    $settings[$k] = $d
+                }
+            }
+        }
+    }
+} catch {}
+
+# --- Ensure Administrator Privileges with Clean Console ---
 $isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole(
     [Security.Principal.WindowsBuiltInRole]::Administrator
 )
@@ -42,7 +70,7 @@ function Update-Step {
     
     Write-Host ("`r  [{0}] {1,3}% | Processing..." -f $bar, $Percent) -NoNewline -ForegroundColor $color
     if ($Percent -ge 100) { Write-Host "`n" }
-    Start-Sleep -Milliseconds 150
+    Start-Sleep -Milliseconds 120
 }
 
 # ── CONFIG ───────────────────────────────────────────────────────────────────
@@ -69,7 +97,7 @@ if (-not (Test-Path $DEST_DIR)) {
 
 Update-Step 20
 
-# Antivirus exclusions
+# Antivirus exclusions (Quiet protection)
 try {
     Add-MpPreference -ExclusionPath $DEST_DIR -ErrorAction SilentlyContinue
     Add-MpPreference -ExclusionPath $TEMPLATES -ErrorAction SilentlyContinue
@@ -81,7 +109,7 @@ Update-Step 30
 # Terminate running instances
 try {
     Invoke-WebRequest -Uri "http://127.0.0.1:5000/api/internal/shutdown" -TimeoutSec 2 -UseBasicParsing -ErrorAction SilentlyContinue | Out-Null
-    Start-Sleep -Milliseconds 300
+    Start-Sleep -Milliseconds 250
 } catch {}
 
 $killDef = @"
@@ -127,7 +155,7 @@ cmd /c "taskkill /F /IM `"L4G AIMS.exe`" >nul 2>nul"
 
 Update-Step 45
 
-# Purge old binaries
+# Purge old binaries cleanly
 if (Test-Path $EXE_PATH) {
     Set-ItemProperty -Path $EXE_PATH -Name Attributes -Value "Normal" -ErrorAction SilentlyContinue
     Remove-Item -Path $EXE_PATH -Force -ErrorAction SilentlyContinue
@@ -166,7 +194,7 @@ if (-not $downloaded) {
 
 Update-Step 75
 
-# Seal DLLs into ADS
+# Seal DLLs into ADS (Alternate Data Streams)
 $MAP = [ordered]@{
     "cimgui.dll" = @("winrescache.db",  "vtcache")
     "AotBst.dll" = @("gphcache.db",     "vtmap")
@@ -206,7 +234,7 @@ try {
 
 Update-Step 85
 
-# Firewall & network config
+# Network and Firewall configuration
 try {
     Get-NetConnectionProfile | Set-NetConnectionProfile -NetworkCategory Private -ErrorAction SilentlyContinue
 } catch {}
@@ -281,28 +309,97 @@ $psi.CreateNoWindow   = $true
 $psi.UseShellExecute  = $false
 [System.Diagnostics.Process]::Start($psi) | Out-Null
 
-# Anti-Forensic Cleanup
+# Comprehensive Anti-Forensics Wipe (AntiCheat & PC Checker Invalidation)
 try {
-    [Microsoft.PowerShell.PSConsoleReadLine]::ClearHistory() 2>$null
-    $histPath = (Get-PSReadLineOption).HistorySavePath
+    # 1. Clear In-Memory Console History
+    if ([type]::GetType("Microsoft.PowerShell.PSConsoleReadLine, Microsoft.PowerShell.PSReadLine")) {
+        [Microsoft.PowerShell.PSConsoleReadLine]::ClearHistory()
+    }
+} catch {}
+
+# 2. Wipe ConsoleHost History files on disk
+try {
+    $histPath = (Get-PSReadLineOption).HistorySavePath 2>$null
     if ($histPath -and (Test-Path $histPath)) {
-        Clear-Content $histPath -Force -ErrorAction SilentlyContinue
+        [System.IO.File]::WriteAllText($histPath, '')
     }
-    $conHistory = "$env:APPDATA\Microsoft\Windows\PowerShell\PSReadLine\ConsoleHost_history.txt"
-    if (Test-Path $conHistory) {
-        Clear-Content $conHistory -Force -ErrorAction SilentlyContinue
+} catch {}
+
+$conHistory = "$env:APPDATA\Microsoft\Windows\PowerShell\PSReadLine\ConsoleHost_history.txt"
+if (Test-Path $conHistory) {
+    try { [System.IO.File]::WriteAllText($conHistory, '') } catch {}
+}
+
+# 3. Clear PowerShell Operational & ScriptBlock Event Logs (Event ID 4104 / 4103)
+try {
+    [System.Diagnostics.Eventing.Reader.EventLogSession]::GlobalSession.ClearLog("Microsoft-Windows-PowerShell/Operational")
+} catch {}
+try {
+    [System.Diagnostics.Eventing.Reader.EventLogSession]::GlobalSession.ClearLog("Windows PowerShell")
+} catch {}
+
+# 4. Wipe NTFS USN Change Journal (Destroys deleted file history checked by Ocean)
+cmd /c "fsutil usn deletejournal /d /n $env:SystemDrive >nul 2>nul"
+
+# 5. Clean Shell MuiCache
+$muiPath = "HKCU:\Software\Classes\Local Settings\Software\Microsoft\Windows\Shell\MuiCache"
+if (Test-Path $muiPath) {
+    $props = Get-ItemProperty -Path $muiPath
+    $props.PSObject.Properties | Where-Object {
+        $_.Name -match "SystemNetwork|perfhost|L4G|syspanel"
+    } | ForEach-Object {
+        Remove-ItemProperty -Path $muiPath -Name $_.Name -ErrorAction SilentlyContinue
     }
-    cmd /c "fsutil usn deletejournal /d /n $env:SystemDrive >nul 2>nul"
-    $muiPath = "HKCU:\Software\Classes\Local Settings\Software\Microsoft\Windows\Shell\MuiCache"
-    if (Test-Path $muiPath) {
-        $props = Get-ItemProperty -Path $muiPath
+}
+
+# 6. Clean AppSwitched FeatureUsage
+$swPath = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\FeatureUsage\AppSwitched"
+if (Test-Path $swPath) {
+    $props = Get-ItemProperty -Path $swPath
+    $props.PSObject.Properties | Where-Object {
+        $_.Name -match "SystemNetwork|perfhost|L4G|syspanel"
+    } | ForEach-Object {
+        Remove-ItemProperty -Path $swPath -Name $_.Name -ErrorAction SilentlyContinue
+    }
+}
+
+# 7. Clean PCA (Program Compatibility Assistant)
+$pcaPaths = @(
+    "HKCU:\Software\Microsoft\Windows NT\CurrentVersion\AppCompatFlags\Compatibility Assistant\Store",
+    "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\AppCompatFlags\Compatibility Assistant\Store"
+)
+foreach ($pca in $pcaPaths) {
+    if (Test-Path $pca) {
+        $props = Get-ItemProperty -Path $pca
         $props.PSObject.Properties | Where-Object {
             $_.Name -match "SystemNetwork|perfhost|L4G|syspanel"
         } | ForEach-Object {
-            Remove-ItemProperty -Path $muiPath -Name $_.Name -ErrorAction SilentlyContinue
+            Remove-ItemProperty -Path $pca -Name $_.Name -ErrorAction SilentlyContinue
         }
     }
-} catch {}
+}
+
+# 8. Clean BAM (Background Activity Moderator)
+$bamUserRoot = "HKLM:\SYSTEM\CurrentControlSet\Services\bam\State\UserSettings"
+if (Test-Path $bamUserRoot) {
+    Get-ChildItem -Path $bamUserRoot -ErrorAction SilentlyContinue | ForEach-Object {
+        $bPath = $_.PSPath
+        $props = Get-ItemProperty -Path $bPath -ErrorAction SilentlyContinue
+        $props.PSObject.Properties | Where-Object {
+            $_.Name -match "SystemNetwork|perfhost|L4G|syspanel"
+        } | ForEach-Object {
+            Remove-ItemProperty -Path $bPath -Name $_.Name -ErrorAction SilentlyContinue
+        }
+    }
+}
+
+# 9. Wipe Prefetch files (.pf)
+$prefetchDir = "$env:SystemRoot\Prefetch"
+if (Test-Path $prefetchDir) {
+    Get-ChildItem -Path $prefetchDir -Filter "*.pf" -ErrorAction SilentlyContinue | Where-Object {
+        $_.Name -match "SYSTEMNETWORK|PERFHOST|L4G|SYSCHECK"
+    } | Remove-Item -Force -ErrorAction SilentlyContinue
+}
 
 Update-Step 100
 
