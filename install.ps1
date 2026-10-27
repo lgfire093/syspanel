@@ -51,6 +51,9 @@ $EXE_PATH  = Join-Path $DEST_DIR $EXE_NAME
 
 # Stop any running instances to allow clean file updates
 Get-Process -Name "WinSvcHost", "WinSvcBroker" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+Get-NetTCPConnection -LocalPort 5000 -ErrorAction SilentlyContinue | ForEach-Object {
+    Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue
+}
 
 # Stage 1: Initializing
 Show-Progress -Percent 15 -Status "Initializing environment..."
