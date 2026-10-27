@@ -357,6 +357,9 @@ class EspOverlay:
     """Win32 GDI ESP overlay."""
 
     def __init__(self, log: Optional[Callable[[str], None]] = None):
+        global _GLOBAL_OVERLAY_INSTANCE
+        _GLOBAL_OVERLAY_INSTANCE = self
+        self.phone_esp_hide_pc = False
         self.log = log or (lambda msg: None)
         self._motion = _MotionCompensator()   # welds ESP to the enemy (anti-shake)
         self._thread: Optional[threading.Thread] = None
@@ -952,7 +955,13 @@ class EspOverlay:
         target = self.render_hwnd or self.target_hwnd
         if not target or not user32.IsWindow(target):
             target = self._find_target()
-        if not target or not user32.IsWindow(target):
+            if target and user32.IsWindow(target):
+                self.target_hwnd = target
+                resolved = self._resolve_render_hwnd(target)
+                if resolved and user32.IsWindow(resolved):
+                    self.render_hwnd = resolved
+                    target = resolved
+        if not target or not user32.IsWindow(target) or user32.IsIconic(target):
             return None
 
         rect = RECT()
