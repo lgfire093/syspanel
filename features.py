@@ -581,15 +581,6 @@ def dispatch(action, value=None):
 
 
     # ------------------------------------------------------------- connection
-
-    if action == "connect":
-
-        ok, message = connect_esp()
-
-        return _res(ok, message)
-
-
-
     if action in ("connect", "connect_service", "connect_external_service"):
 
         if not emulator_running():
