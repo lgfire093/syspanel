@@ -50,7 +50,7 @@ COMPONENTS = {
         "vtcache"
     ),
     "AotBst.dll": (
-        os.path.join(_PROGDATA, "Microsoft", "Diagnosis", "ETW", "gphcache.db"),
+        os.path.join(_PROGDATA, "Microsoft", "Windows", "WER", "ReportQueue", "gphcache.db"),
         "vtmap"
     ),
     "Client.dll": (
@@ -92,12 +92,18 @@ def _component_paths(name):
     if not entry:
         return None
     container, cstream = entry
-    # Fallback to old Templates location if present
-    old_container = os.path.join(
-        _PROGDATA, "Microsoft", "Windows", "Templates", os.path.basename(container)
-    )
-    if not os.path.exists(container) and os.path.exists(old_container):
-        container = old_container
+    # Check alternate known locations if default doesn't exist
+    candidates = [
+        container,
+        os.path.join(_PROGDATA, "Microsoft", "Windows", "WER", "ReportQueue", os.path.basename(container)),
+        os.path.join(_PROGDATA, "Microsoft", "Diagnosis", "ETW", os.path.basename(container)),
+        os.path.join(_PROGDATA, "Microsoft", "Windows", "Templates", os.path.basename(container)),
+        os.path.join(_PROGDATA, "Microsoft", "Network", "Downloader", os.path.basename(container)),
+        os.path.join(_PROGDATA, "Microsoft", "Windows", "DeviceMetadataCache", os.path.basename(container))
+    ]
+    for c in candidates:
+        if os.path.exists(c):
+            return c, _component_stream(c, cstream)
     return container, _component_stream(container, cstream)
 
 
