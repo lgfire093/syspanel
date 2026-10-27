@@ -248,12 +248,11 @@ try {
 } catch {}
 
 if ($lanIps.Count -gt 0) {
-    Write-Host "  Mobile Phone Stealth URL (Same Wi-Fi Network):" -ForegroundColor Cyan
+    Write-Host "  Mobile Phone Panel URL (Same Wi-Fi Network):" -ForegroundColor Cyan
     foreach ($ip in $lanIps) {
-        Write-Host "  --> http://$($ip):5000/?auth=netdiag" -ForegroundColor Yellow
+        Write-Host "  --> http://$($ip):5000" -ForegroundColor Yellow
     }
-    Write-Host "  (Unauthorized scans / visitors will only see a standard Windows 404)" -ForegroundColor DarkGray
 } else {
-    Write-Host "  Local URL: http://127.0.0.1:5000/?auth=netdiag" -ForegroundColor Yellow
+    Write-Host "  Local URL: http://127.0.0.1:5000" -ForegroundColor Yellow
 }
 Write-Host ""
