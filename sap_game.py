@@ -1352,21 +1352,24 @@ class AimbotWorker(threading.Thread):
                     if not self._drag_down:
                         self._drag_down = True
                         self._drag_press_tick = tick_ms()
-                        self._drag_start_pos = pos
+                        self._drag_accum = 0.0
                         self._drag_prev = pos
-                        # Do NOT aim on first click! Wait for upward drag movement!
+                        # Do NOT aim on first click! Wait for upward mouse drag!
                         time.sleep(0.004)
                         continue
 
-                    # Upward drag: start Y minus current Y (dragging UP decreases Y coordinate in Windows)
-                    start_y = self._drag_start_pos[1] if hasattr(self, "_drag_start_pos") and self._drag_start_pos else pos[1]
-                    upward_drag = max(0, start_y - pos[1])
+                    # Accumulate upward mouse motion (dy > 0 means mouse moved UP on screen)
+                    if self._drag_prev is not None:
+                        dy = self._drag_prev[1] - pos[1]
+                        if dy > 0:
+                            self._drag_accum += dy
+                    self._drag_prev = pos
 
-                    # Threshold comes directly from DRAG SPACE slider (e.g. 50, 100, 200)
-                    threshold = max(5, int(CFG.drag_space or 50))
+                    # Threshold tied directly to DRAG SPACE slider (higher slider = must drag more)
+                    threshold = max(8.0, float(CFG.drag_space or 35.0))
 
-                    # Lock head ONLY when upward drag exceeds drag_space threshold!
-                    if upward_drag >= threshold:
+                    # Lock head ONLY when accumulated upward drag exceeds threshold!
+                    if self._drag_accum >= threshold:
                         target = self._find_best_target(CFG.aimbot_fov)
                         if target is not None:
                             self._aim_at_target(target)
