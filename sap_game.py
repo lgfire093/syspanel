@@ -30,53 +30,61 @@ _DIAG_ENABLED = os.environ.get("L4G_LOGS", "0") == "1"
 _DIAG_MAX_BYTES = 512 * 1024
 
 # ---------------------------------------------------------------------------
-# Offsets.cs (OB55 Latest Update - AotForms)
+# Offsets.cs (OB55 Free Fire India / Global - OFFSETANDBONES.txt)
 # ---------------------------------------------------------------------------
 
-# ================= STATIC / BASE =================
-INIT_BASE = 0xA342EFC
+# ================= CORE / BASE =================
+# Free Fire India (com.garena.game.ffi) uses 0xA33ED84
+# Free Fire Global / TH / Max uses 0xA342EFC
+INIT_BASE_FFI = 0xA33ED84
+INIT_BASE_GLOBAL = 0xA342EFC
+INIT_BASE = 0xA33ED84
+
 GAME_FACADE_SCRIPT = 0xA5BC344
 STATIC_CLASS = 0x5C
 ACCESS_STATIC_CLASS = 0x5C
 
-# ================= MATCH / GAME STATE =================
 CURRENT_MATCH = 0x50
 M_MATCH = 0x50
 CURRENT_MATCH_GAME = 0x4
 MATCH_STATUS = 0x8C
 MATCH_STATE = 0x8C
-GAME_TIMER = 0x10
-FIXED_DELTA_TIME = 0x24
-LEVEL = 0x14
 
-# ================= PLAYER =================
 LOCAL_PLAYER = 0x94
 LOCAL_PLAYER_ATTRIB = 0x500
 DICTIONARY_ENTITIES = 0x68
-PLAYER_NAME = 0x31C
+
+# ================= PLAYER =================
 PLAYER_IS_DEAD = 0x50
+PLAYER_NAME = 0x31C
 PLAYER_DATA = 0x48
 PLAYER_DATA_POOL = 0x48
 PLAYER_SHADOW_BASE = 0x1A60
-IS_CLIENT_BOT = 0x324
+LOCAL_PLAYER_ATTRIBUTES = 0x500
 XPOSE = 0x78
-
-# ================= AVATAR =================
-AVATAR = 0xA8
 AVATAR_MANAGER = 0x504
+AVATAR = 0xA8
+AVATAR_IS_VISIBLE = 0x95
 AVATAR_DATA = 0x14
 AVATAR_DATA_IS_TEAM = 0x59
-AVATAR_IS_VISIBLE = 0x95
+IS_CLIENT_BOT = 0x324
 
-# ================= CAMERA =================
+# ================= CAMERA / AIM =================
+VIEW_MATRIX = 0xE8
+FOLLOW_CAMERA = 0x494
+CAMERA = 0x18
 CAMERA_INTPTR = 0x8
 MAIN_CAMERA_TRANSFORM = 0x28C
-CAMERA = 0x18
-FOLLOW_CAMERA = 0x494
-
-# ================= OBSERVER =================
-OBSERVER_PLAYER = 0x28
-CURRENT_OBSERVER = 0xB4
+AIM_ROTATION = 0x440
+HEAD_COLLIDER_ALT = 0x18
+SAFE_AIM_ROTATION = 0x440
+INSTANT_AIM_ROTATION = 0x131C
+ROTATION_CALL_COUNTER = 0x5A8
+LOCAL_PLAYER_IS_FIRING = 0x58C
+SAIM1 = 0x58C
+SAIM2 = 0x9D0
+SAIM3 = 0x38
+SAIM4 = 0x2C
 
 # ================= WEAPON =================
 WEAPON = 0x434
@@ -85,28 +93,31 @@ WEAPON_INFO_TYPE = 0x64
 WEAPON_RECOIL = 0xC
 WEAPON_RECOIL_SCATTER = 0xC
 RAPIDFIRE_PTR = 0x1C8
+NO_RELOAD = 0xC1
 NO_RELOAD_PTR = 0xC1
 
-# ================= AIM =================
-HEAD_COLLIDER = 0x4E8
-AIMBOT_VISIBLE = 0x4E8
-AIM_ROTATION = 0x440
-SAIM1 = 0x58C
-SAIM2 = 0x9D0
-SAIM3 = 0x38
-SAIM4 = 0x2C
+# ================= COLLIDER =================
+LOCKED_AIMING_COLLIDER = 0x54
 PORUL = 0x54
+HEAD_COLLIDER = 0x4E8
+COLLIDER = 0x4E8
+AIMBOT_VISIBLE = 0x4E8
 
-VIEW_MATRIX = 0xE8
+# ================= MISC =================
+GAME_TIMER = 0x10
+FIXED_DELTA_TIME = 0x24
+LEVEL = 0x14
 
 # ---------------------------------------------------------------------------
-# Bones.cs (OB55 Latest Update - AotForms)
+# Bones.cs (OFFSETANDBONES.txt - Free Fire India kBoneSets[2])
 # ---------------------------------------------------------------------------
 
 # Head / Spine / Core
 B_HEAD = 0x49C
 B_HIP = 0x4A0
+B_NECK = 0x4A4       # Neck in dump (Spine in BoneSet: 0x4A4)
 B_SPINE = 0x4A4
+B_BREAST = 0x4A8     # Alias from notes
 B_GROIN = 0x4AC
 B_ROOT = 0x4B0
 B_ROOT_PES = 0x4B0
@@ -128,6 +139,7 @@ B_RIGHT_WRIST_JOINT = 0x498
 B_LEFT_ELBOW = 0x4E4
 B_RIGHT_ELBOW = 0x4E0
 B_LEFT_WRIST = 0x4DC
+B_LEFT_WRIST_JOINT = 0x4DC
 B_RIGHT_WRIST = 0x4D8
 
 user32 = ctypes.windll.user32
@@ -692,6 +704,13 @@ class DataWorker(threading.Thread):
             self._clear_caches(now_tick)
 
         base_game_facade = self.mem.read_u32(STATE.il2cpp + INIT_BASE)
+        if not base_game_facade:
+            alt_base = INIT_BASE_GLOBAL if INIT_BASE == INIT_BASE_FFI else INIT_BASE_FFI
+            alt_facade = self.mem.read_u32(STATE.il2cpp + alt_base)
+            if alt_facade:
+                INIT_BASE = alt_base
+                base_game_facade = alt_facade
+
         if not base_game_facade:
             self.failed_read_count += 1
             if self.failed_read_count > 30:
