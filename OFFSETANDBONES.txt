@@ -1,0 +1,109 @@
+==========================================================
+ FREE FIRE INDIA - OFFSETS AND BONES
+ Package : com.garena.game.ffi
+ Profile : GameVersion::FreeFireIndia (index 2)
+ Source  : CXCKernel/EspLines/Offsets.hpp
+==========================================================
+
+CODE X CHEAT DUMPER
+
+-------------------- CORE / BASE --------------------
+InitBase                 0xA33ED84
+StaticClass              0x5C
+
+CurrentMatch             0x50
+MatchStatus              0x8C
+LocalPlayer              0x94
+DictionaryEntities       0x68
+
+-------------------- PLAYER -------------------- FINDED BY AASHIQ 
+Player_IsDead            0x50
+Player_Name              0x31C
+Player_Data              0x48
+Player_ShadowBase        0x1A60
+LocalPlayerAttributes    0x500
+XPose                    0x78
+AvatarManager            0x504
+Avatar                   0xA8
+Avatar_IsVisible         0x95
+Avatar_Data              0x14
+Avatar_Data_IsTeam       0x59
+IsClientBot              0x324
+
+-------------------- CAMERA / AIM --------------------FINDED BY AASHIQ 
+ViewMatrix               0xE8
+FollowCamera             0x494
+Camera                   0x18
+MainCameraTransform      0x28C
+AimRotation              0x440
+HeadColliderAlt          0x18
+SafeAimRotation          0x440
+InstantAimRotation       0x131C
+RotationCallCounter      0x5A8
+LocalPlayerIsFiring      0x58C
+sAim1                    0x58C
+sAim2                    0x9D0
+sAim3                    0x38
+sAim4                    0x2C
+
+-------------------- WEAPON --------------------FINDED BY AASHIQ 
+Weapon                   0x434
+WeaponData               0x58
+WeaponRecoil             0xC
+
+-------------------- COLLIDER --------------------FINDED BY AASHIQ 
+LockedAimingCollider     0x54
+Collider                 0x4E8
+HeadCollider             0x4E8
+
+-------------------- MISC --------------------
+NoReload                 0xC1
+GameTimer                0x10
+FixedDeltaTime           0x24
+
+==========================================================FINDED BY AASHIQ 
+ BONES (kBoneSets[2])
+==========================================================FINDED BY AASHIQ 
+Head                     0x49C
+Hip                      0x4A0
+Neck                     0x4A4   (dump Spine; dump Neck 0x498 collides with RightHand)
+Groin                    0x4AC
+Root / RootBone          0x4B0
+
+LeftAnkle                0x4B8
+RightAnkle               0x4BC
+LeftFoot                 0x4C0
+RightFoot                0x4C4
+
+LeftHand                 0x4C8
+RightHand                0x498   (dump Neck / RightWristJoint)
+
+LeftShoulder             0x4D0
+RightShoulder            0x4D4
+
+LeftElbow                0x4E4
+RightElbow               0x4E0
+
+LeftWrist                0x4DC   (also LeftWristJoint)
+RightWrist               0x4D8
+
+-------------------- BONE ALIASES / NOTES --------------------
+Breast                   0x4A8   (not used by BoneSet)
+RightWristJoint          0x498   (= RightHand)
+LeftWristJoint           0x4DC   (= LeftWrist)
+HeadCollider             0x4E8   (profile field, not BoneSet)
+
+Neck note:
+  The dump lists Neck = 0x498, but that offset is the
+  RightHand / RightWristJoint. The real neck is Spine = 0x4A4,
+  same as the working Free Fire profile.
+
+==========================================================
+ ESP TEXT
+==========================================================
+Player name text offset : 0x31C
+Read: entity + 0x31C -> String object -> name
+Used in Data.cpp: Mem.ReadUnityPlayerNameFromEntity(entity, Offsets::Player_Name)
+
+
+CODE X CHEAT DUMPER 
