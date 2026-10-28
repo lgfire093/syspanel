@@ -30,60 +30,105 @@ _DIAG_ENABLED = os.environ.get("L4G_LOGS", "0") == "1"
 _DIAG_MAX_BYTES = 512 * 1024
 
 # ---------------------------------------------------------------------------
-# Offsets.cs (OB55)
+# Offsets.cs (OB55 Latest Update - AotForms)
 # ---------------------------------------------------------------------------
 
+# ================= STATIC / BASE =================
 INIT_BASE = 0xA342EFC
+GAME_FACADE_SCRIPT = 0xA5BC344
 STATIC_CLASS = 0x5C
-CURRENT_MATCH = 0x50
-MATCH_STATUS = 0x8C
-LOCAL_PLAYER = 0x94
-DICTIONARY_ENTITIES = 0x68
+ACCESS_STATIC_CLASS = 0x5C
 
-PLAYER_IS_DEAD = 0x50
+# ================= MATCH / GAME STATE =================
+CURRENT_MATCH = 0x50
+M_MATCH = 0x50
+CURRENT_MATCH_GAME = 0x4
+MATCH_STATUS = 0x8C
+MATCH_STATE = 0x8C
+GAME_TIMER = 0x10
+FIXED_DELTA_TIME = 0x24
+LEVEL = 0x14
+
+# ================= PLAYER =================
+LOCAL_PLAYER = 0x94
+LOCAL_PLAYER_ATTRIB = 0x500
+DICTIONARY_ENTITIES = 0x68
 PLAYER_NAME = 0x31C
+PLAYER_IS_DEAD = 0x50
 PLAYER_DATA = 0x48
+PLAYER_DATA_POOL = 0x48
 PLAYER_SHADOW_BASE = 0x1A60
+IS_CLIENT_BOT = 0x324
 XPOSE = 0x78
 
-AVATAR_MANAGER = 0x504
+# ================= AVATAR =================
 AVATAR = 0xA8
-AVATAR_IS_VISIBLE = 0x95
+AVATAR_MANAGER = 0x504
 AVATAR_DATA = 0x14
 AVATAR_DATA_IS_TEAM = 0x59
+AVATAR_IS_VISIBLE = 0x95
 
-FOLLOW_CAMERA = 0x494
-CAMERA = 0x18
+# ================= CAMERA =================
+CAMERA_INTPTR = 0x8
 MAIN_CAMERA_TRANSFORM = 0x28C
+CAMERA = 0x18
+FOLLOW_CAMERA = 0x494
 
+# ================= OBSERVER =================
+OBSERVER_PLAYER = 0x28
+CURRENT_OBSERVER = 0xB4
+
+# ================= WEAPON =================
 WEAPON = 0x434
 WEAPON_DATA = 0x58
+WEAPON_INFO_TYPE = 0x64
 WEAPON_RECOIL = 0xC
+WEAPON_RECOIL_SCATTER = 0xC
+RAPIDFIRE_PTR = 0x1C8
+NO_RELOAD_PTR = 0xC1
+
+# ================= AIM =================
+HEAD_COLLIDER = 0x4E8
+AIMBOT_VISIBLE = 0x4E8
+AIM_ROTATION = 0x440
+SAIM1 = 0x58C
+SAIM2 = 0x9D0
+SAIM3 = 0x38
+SAIM4 = 0x2C
+PORUL = 0x54
 
 VIEW_MATRIX = 0xE8
-CURRENT_OBSERVER = 0xB4
-OBSERVER_PLAYER = 0x28
 
-PORUL = 0x54
-HEAD_COLLIDER = 0x4E8
+# ---------------------------------------------------------------------------
+# Bones.cs (OB55 Latest Update - AotForms)
+# ---------------------------------------------------------------------------
 
-# Bones.cs (OB55)
+# Head / Spine / Core
 B_HEAD = 0x49C
 B_HIP = 0x4A0
 B_SPINE = 0x4A4
+B_GROIN = 0x4AC
 B_ROOT = 0x4B0
+B_ROOT_PES = 0x4B0
+
+# Legs
 B_LEFT_ANKLE = 0x4B8
 B_RIGHT_ANKLE = 0x4BC
 B_LEFT_FOOT = 0x4C0
+B_LEFT_TOE = 0x4C0
 B_RIGHT_FOOT = 0x4C4
-B_RIGHT_WRIST_JOINT = 0x498
-B_LEFT_HAND = 0x4C8
+B_RIGHT_TOE = 0x4C4
+
+# Arms
 B_LEFT_SHOULDER = 0x4D0
 B_RIGHT_SHOULDER = 0x4D4
-B_RIGHT_WRIST = 0x4D8
-B_LEFT_WRIST = 0x4DC
-B_RIGHT_ELBOW = 0x4E0
+B_LEFT_HAND = 0x4C8
+B_RIGHT_HAND = 0x498
+B_RIGHT_WRIST_JOINT = 0x498
 B_LEFT_ELBOW = 0x4E4
+B_RIGHT_ELBOW = 0x4E0
+B_LEFT_WRIST = 0x4DC
+B_RIGHT_WRIST = 0x4D8
 
 user32 = ctypes.windll.user32
 kernel32 = ctypes.windll.kernel32
@@ -979,6 +1024,22 @@ class DataWorker(threading.Thread):
         right_foot = self._bone_position(slots, entity_addr, B_RIGHT_FOOT)
         if right_foot is not None:
             player.right_foot = right_foot
+
+        left_elbow = self._bone_position(slots, entity_addr, B_LEFT_ELBOW)
+        if left_elbow is not None:
+            player.left_elbow = left_elbow
+
+        right_elbow = self._bone_position(slots, entity_addr, B_RIGHT_ELBOW)
+        if right_elbow is not None:
+            player.right_elbow = right_elbow
+
+        left_ankle = self._bone_position(slots, entity_addr, B_LEFT_ANKLE)
+        if left_ankle is not None:
+            player.left_ankle = left_ankle
+
+        right_ankle = self._bone_position(slots, entity_addr, B_RIGHT_ANKLE)
+        if right_ankle is not None:
+            player.right_ankle = right_ankle
 
         if fresh:
             player.last_data_ok_tick = now_tick
