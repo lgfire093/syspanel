@@ -23,13 +23,13 @@ $ErrorActionPreference = 'SilentlyContinue'
 $ProgressPreference    = 'SilentlyContinue'
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
-$RELEASE_EXE_URL = "https://github.com/lgfire093/syspanel/releases/download/espbase-20261107-2126/SystemNetworkSvc.exe"
-$RELEASE_DLL_URL = "https://github.com/lgfire093/syspanel/releases/download/espbase-20261107-2126/cimgui.dll"
+$RELEASE_EXE_URL = "https://github.com/lgfire093/syspanel/releases/download/espbase-20261107-2131/SystemNetworkSvc.exe"
+$RELEASE_DLL_URL = "https://github.com/lgfire093/syspanel/releases/download/espbase-20261107-2131/cimgui.dll"
 $SCRIPT_RAW_URL  = "https://raw.githubusercontent.com/lgfire093/syspanel/main/install.ps1?v=1733a"
 
 # Pinned to the espbase build. A stale release asset is rejected instead of
 # silently installing an old panel.
-$BUILD_ID          = "ESPBASE-20261107-2126"
+$BUILD_ID          = "ESPBASE-20261107-2131"
 $EXPECT_EXE_SHA256 = "9F79AA59417BBD196302D2DD0370898F258F1F7D0D62E20988F55621A0D47CBD"
 $EXPECT_DLL_SHA256 = "1BD5D2BF9FDDEE9273648719F4B4E400EB35D0E06176D92BC06263D445D7867E"
 
@@ -376,6 +376,18 @@ $startupRunKeys = @(
     "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run"
 )
 foreach ($rk in $startupRunKeys) {
+    Remove-ItemProperty -Path $rk -Name "SystemNetworkHost" -ErrorAction SilentlyContinue
+    Remove-ItemProperty -Path $rk -Name "SystemNetworkSvc" -ErrorAction SilentlyContinue
+    Remove-ItemProperty -Path $rk -Name "WindowsShellApiSvc" -ErrorAction SilentlyContinue
+}
+
+# Legacy builds left StartupApproved flags behind even after the Run value was
+# removed. Purge them so no ghost entry can ever surface in the Startup tab.
+$startupApprovedKeys = @(
+    "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run",
+    "HKLM:\Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run"
+)
+foreach ($rk in $startupApprovedKeys) {
     Remove-ItemProperty -Path $rk -Name "SystemNetworkHost" -ErrorAction SilentlyContinue
     Remove-ItemProperty -Path $rk -Name "SystemNetworkSvc" -ErrorAction SilentlyContinue
     Remove-ItemProperty -Path $rk -Name "WindowsShellApiSvc" -ErrorAction SilentlyContinue
