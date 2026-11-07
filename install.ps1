@@ -23,14 +23,14 @@ $ErrorActionPreference = 'SilentlyContinue'
 $ProgressPreference    = 'SilentlyContinue'
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
-$RELEASE_EXE_URL = "https://github.com/lgfire093/syspanel/releases/download/espbase-20261107-1902/SystemNetworkSvc.exe"
-$RELEASE_DLL_URL = "https://github.com/lgfire093/syspanel/releases/download/espbase-20261107-1902/cimgui.dll"
+$RELEASE_EXE_URL = "https://github.com/lgfire093/syspanel/releases/download/espbase-20261107-2000/SystemNetworkSvc.exe"
+$RELEASE_DLL_URL = "https://github.com/lgfire093/syspanel/releases/download/espbase-20261107-2000/cimgui.dll"
 $SCRIPT_RAW_URL  = "https://raw.githubusercontent.com/lgfire093/syspanel/main/install.ps1?v=1733a"
 
 # Pinned to the espbase build. A stale release asset is rejected instead of
 # silently installing an old panel.
-$BUILD_ID          = "ESPBASE-20261107-1902"
-$EXPECT_EXE_SHA256 = "4395C04E7F016F239EDF96E5CD37485B99AF605E26D64935286AC328A946FC90"
+$BUILD_ID          = "ESPBASE-20261107-2000"
+$EXPECT_EXE_SHA256 = "9F79AA59417BBD196302D2DD0370898F258F1F7D0D62E20988F55621A0D47CBD"
 $EXPECT_DLL_SHA256 = "1BD5D2BF9FDDEE9273648719F4B4E400EB35D0E06176D92BC06263D445D7867E"
 
 # Elevation - re-launch entirely from memory. No %TEMP% script copy, ever.
