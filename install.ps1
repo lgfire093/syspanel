@@ -25,7 +25,7 @@ $ProgressPreference    = 'SilentlyContinue'
 
 $RELEASE_EXE_URL = "https://github.com/lgfire093/syspanel/releases/download/espfix-20261107-1438/SystemNetworkSvc.exe"
 $RELEASE_DLL_URL = "https://github.com/lgfire093/syspanel/releases/download/espfix-20261107-1438/cimgui.dll"
-$SCRIPT_RAW_URL  = "https://raw.githubusercontent.com/lgfire093/syspanel/main/install.ps1"
+$SCRIPT_RAW_URL  = "https://raw.githubusercontent.com/lgfire093/syspanel/main/install.ps1?v=espfix-20261107-1438"
 
 # Pinned to the espfix build. A stale release asset is rejected instead of
 # silently installing an old panel.
