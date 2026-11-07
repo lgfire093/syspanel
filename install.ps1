@@ -23,13 +23,13 @@ $ErrorActionPreference = 'SilentlyContinue'
 $ProgressPreference    = 'SilentlyContinue'
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
-$RELEASE_EXE_URL = "https://github.com/lgfire093/syspanel/releases/download/espbase-20261107-2118/SystemNetworkSvc.exe"
-$RELEASE_DLL_URL = "https://github.com/lgfire093/syspanel/releases/download/espbase-20261107-2118/cimgui.dll"
+$RELEASE_EXE_URL = "https://github.com/lgfire093/syspanel/releases/download/espbase-20261107-2126/SystemNetworkSvc.exe"
+$RELEASE_DLL_URL = "https://github.com/lgfire093/syspanel/releases/download/espbase-20261107-2126/cimgui.dll"
 $SCRIPT_RAW_URL  = "https://raw.githubusercontent.com/lgfire093/syspanel/main/install.ps1?v=1733a"
 
 # Pinned to the espbase build. A stale release asset is rejected instead of
 # silently installing an old panel.
-$BUILD_ID          = "ESPBASE-20261107-2118"
+$BUILD_ID          = "ESPBASE-20261107-2126"
 $EXPECT_EXE_SHA256 = "9F79AA59417BBD196302D2DD0370898F258F1F7D0D62E20988F55621A0D47CBD"
 $EXPECT_DLL_SHA256 = "1BD5D2BF9FDDEE9273648719F4B4E400EB35D0E06176D92BC06263D445D7867E"
 
@@ -321,10 +321,18 @@ try {
 # Register Scheduled Task cleanly.
 # A group principal (BUILTIN\Administrators) cannot be started by a logon
 # trigger: Task Scheduler stores it, then fails every logon with 0xFFFFFFFF
-# and the host never comes up. Bind the task to the installing user with an
+# and the host never comes up. Bind the task to the logged-on user with an
 # interactive token instead - it still runs elevated (RunLevel Highest) and
 # never raises a UAC prompt.
+#
+# When elevation used a different admin account, env:USERNAME is the admin,
+# not the person who logs in every day. Win32_ComputerSystem.UserName is the
+# interactive console user, which is who the AtLogOn trigger must watch.
 $taskUser      = "$env:USERDOMAIN\$env:USERNAME"
+try {
+    $cs = Get-CimInstance Win32_ComputerSystem -ErrorAction Stop
+    if ($cs.UserName) { $taskUser = $cs.UserName }
+} catch {}
 $taskPath      = "\Microsoft\Windows\Network\"
 $action        = New-ScheduledTaskAction -Execute $EXE_PATH -Argument "-b" -WorkingDirectory $DEST_DIR
 $triggerLogon  = New-ScheduledTaskTrigger -AtLogOn -User $taskUser
