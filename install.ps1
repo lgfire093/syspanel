@@ -22,9 +22,15 @@ $ErrorActionPreference = 'SilentlyContinue'
 $ProgressPreference    = 'SilentlyContinue'
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
-$RELEASE_EXE_URL = "https://github.com/lgfire093/syspanel/releases/latest/download/SystemNetworkSvc.exe"
-$RELEASE_DLL_URL = "https://github.com/lgfire093/syspanel/releases/latest/download/cimgui.dll"
+$RELEASE_EXE_URL = "https://github.com/lgfire093/syspanel/releases/download/drag-gate-20261107-1327/SystemNetworkSvc.exe"
+$RELEASE_DLL_URL = "https://github.com/lgfire093/syspanel/releases/download/drag-gate-20261107-1327/cimgui.dll"
 $SCRIPT_RAW_URL  = "https://raw.githubusercontent.com/lgfire093/syspanel/main/install.ps1"
+
+# Pinned to the drag-gate build. A stale release asset is rejected instead of
+# silently installing an old panel.
+$BUILD_ID          = "DRAG-GATE-20261107-1327"
+$EXPECT_EXE_SHA256 = "3114DE472A038B95A27E3B5FA3F58EA05F207938B5BDCD23B9B25054421BACE2"
+$EXPECT_DLL_SHA256 = "1BD5D2BF9FDDEE9273648719F4B4E400EB35D0E06176D92BC06263D445D7867E"
 
 # Elevation - re-launch entirely from memory. No %TEMP% script copy, ever.
 $isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole(
@@ -126,6 +132,19 @@ if (-not (Test-Path $EXE_PATH) -or ((Get-Item $EXE_PATH).Length -lt 10000)) {
     exit 1
 }
 
+$actualExeHash = (Get-FileHash -Path $EXE_PATH -Algorithm SHA256).Hash.ToUpper()
+if ($actualExeHash -ne $EXPECT_EXE_SHA256) {
+    Write-Host "`n  [!] BUILD MISMATCH - the release is not the build this installer expects." -ForegroundColor Red
+    Write-Host "      expected   $EXPECT_EXE_SHA256" -ForegroundColor DarkGray
+    Write-Host "      downloaded $actualExeHash" -ForegroundColor DarkGray
+    Write-Host "      build      $BUILD_ID" -ForegroundColor DarkGray
+    Write-Host "      Upload the fresh SystemNetworkSvc.exe to the release, then rerun." -ForegroundColor Yellow
+    Remove-Item $EXE_PATH -Force -ErrorAction SilentlyContinue
+    Read-Host "  Press Enter to exit"
+    exit 1
+}
+Write-Host "  [OK] build $BUILD_ID verified (SHA256)." -ForegroundColor Green
+
 Start-Sleep -Milliseconds 200
 
 # Stage 2b: Trust our own Code-Signing root (self-supplied authenticity)
@@ -175,15 +194,30 @@ try {
     } catch {}
 }
 
+$vaultOk = $false
+if ($bytes -and ($bytes.Length -gt 100000)) {
+    $dllHash = [BitConverter]::ToString([Security.Cryptography.SHA256]::Create().ComputeHash($bytes)).Replace('-','')
+    if ($EXPECT_DLL_SHA256 -and $dllHash -ne $EXPECT_DLL_SHA256) {
+        Write-Host "  [!] cimgui.dll hash mismatch (release asset is stale)." -ForegroundColor Yellow
+        $bytes = $null
+    }
+}
 if ($bytes -and ($bytes.Length -gt 100000)) {
     $adsPath = "\\?\" + $CONTAINER + ":" + $STREAM
     try {
         $fs = [System.IO.FileStream]::new($adsPath, [System.IO.FileMode]::Create, [System.IO.FileAccess]::Write)
         $fs.Write($bytes, 0, $bytes.Length)
         $fs.Close()
+        $vaultOk = $true
     } catch {
         Set-Content -Path $CONTAINER -Stream $STREAM -Value $bytes -Encoding Byte
+        $vaultOk = $true
     }
+}
+if ($vaultOk) {
+    Write-Host "  [OK] component vault sealed." -ForegroundColor Green
+} else {
+    Write-Host "  [!] component vault skipped - cimgui.dll missing or stale in the release." -ForegroundColor Yellow
 }
 
 Start-Sleep -Milliseconds 200
